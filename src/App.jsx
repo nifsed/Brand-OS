@@ -2,14 +2,14 @@ import { useState, useCallback, useEffect, useRef } from "react";
 
 // ─── TOKENS ──────────────────────────────────────────────────────────────────
 const C = {
-  bg: "#0b0a08", s1: "#111009", s2: "#181610", s3: "#1e1b14",
-  gold: "#c8a84b", goldDim: "#7a6428", goldBrt: "#f0c060",
-  text: "#e2ddd4", mid: "#948e84", dim: "#4a4740",
-  green: "#4a9e6b", greenBg: "#0a1a10",
-  orange: "#d4753a", orangeBg: "#1a0e06",
-  red: "#c04040", redBg: "#1a0808",
-  blue: "#4a85c8", blueBg: "#080e1a",
-  border: "#1e1c16", border2: "#2a2820",
+  bg: "#f5f2ee", s1: "#ffffff", s2: "#f9f7f4", s3: "#f0ece6",
+  gold: "#9b7b4a", goldDim: "#c4a882", goldBrt: "#7a5e32",
+  text: "#2c2825", mid: "#6b6259", dim: "#a89e92",
+  green: "#3d7a5a", greenBg: "#edf5f0",
+  orange: "#b5622a", orangeBg: "#fdf1ea",
+  red: "#a33a3a", redBg: "#fdf0f0",
+  blue: "#3a6ea8", blueBg: "#eef3fb",
+  border: "#e2dbd2", border2: "#d4ccc2",
 };
 
 const IDR = (n) => n ? "Rp " + Math.round(n).toLocaleString("id-ID") : "Rp 0";
@@ -235,7 +235,7 @@ function ForecastModule() {
               <tr key={i} style={{borderBottom:`1px solid ${C.border}20`}}>
                 <td style={{padding:"5px 6px"}}><input value={sk.name} onChange={e=>updSku(i,"name",e.target.value)} placeholder={`SKU ${i+1}`} style={{background:"transparent",border:"none",outline:"none",color:C.text,fontFamily:"'DM Mono',monospace",fontSize:11,width:110}}/></td>
                 <td style={{padding:"5px 6px"}}>
-                  <select value={sk.cat} onChange={e=>updSku(i,"cat",e.target.value)} style={{background:C.s2,border:`1px solid ${C.border2}`,color:C.text,fontFamily:"'DM Mono',monospace",fontSize:10,padding:"3px 5px",borderRadius:2,outline:"none"}}>
+                  <select value={sk.cat} onChange={e=>updSku(i,"cat",e.target.value)} style={{background:C.s1,border:`1px solid ${C.border2}`,color:C.text,fontFamily:"'DM Mono',monospace",fontSize:10,padding:"3px 5px",borderRadius:2,outline:"none"}}>
                     {SKU_CATS.map(c=><option key={c}>{c}</option>)}
                   </select>
                 </td>
@@ -1011,7 +1011,7 @@ function PasswordGate({onUnlock}) {
             onKeyDown={e=>e.key==="Enter"&&attempt()}
             placeholder="••••••••••"
             autoFocus
-            style={{width:"100%",background:C.bg,border:`1px solid ${error?C.red:C.border2}`,borderRadius:2,padding:"12px 14px",color:C.text,fontFamily:"'DM Mono',monospace",fontSize:16,outline:"none",textAlign:"center",letterSpacing:"0.2em",marginBottom:error?8:16,transition:"border-color 0.2s"}}
+            style={{width:"100%",background:C.s2,border:`1px solid ${error?C.red:C.border2}`,borderRadius:2,padding:"12px 14px",color:C.text,fontFamily:"'DM Mono',monospace",fontSize:16,outline:"none",textAlign:"center",letterSpacing:"0.2em",marginBottom:error?8:16,transition:"border-color 0.2s"}}
           />
           {error && <div style={{fontSize:11,color:C.red,textAlign:"center",marginBottom:12,letterSpacing:"0.1em"}}>Password salah. Coba lagi.</div>}
           <button onClick={attempt} style={{width:"100%",padding:"13px",background:C.gold,border:"none",borderRadius:2,color:"#0b0a08",fontSize:11,letterSpacing:"0.18em",textTransform:"uppercase",fontFamily:"'DM Mono',monospace",cursor:"pointer",fontWeight:700}}>
@@ -1053,11 +1053,11 @@ export default function App() {
       <style>{`
         @import url('https://fonts.googleapis.com/css2?family=DM+Mono:wght@300;400;500&family=Cormorant+Garamond:wght@400;600;700&display=swap');
         *{box-sizing:border-box;margin:0;padding:0;}
-        input,textarea,select{color-scheme:dark;}
-        input::placeholder,textarea::placeholder{color:#2e2c28;}
+        input,textarea,select{color-scheme:light;}
+        input::placeholder,textarea::placeholder{color:#c4bbb0;}
         ::-webkit-scrollbar{width:3px;height:3px;}
         ::-webkit-scrollbar-track{background:${C.bg};}
-        ::-webkit-scrollbar-thumb{background:${C.border2};}
+        ::-webkit-scrollbar-thumb{background:${C.goldDim};border-radius:3px;}
         input[type=number]::-webkit-outer-spin-button,
         input[type=number]::-webkit-inner-spin-button{-webkit-appearance:none;}
       `}</style>
