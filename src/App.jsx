@@ -304,16 +304,39 @@ function ForecastModule() {
 function SizeModule() {
   const sizes = ["XXS","XS","S","M","L","XL","XXL","XXXL"];
   const [ratios, setRatios] = useLocalState("size_ratios", {XXS:0,XS:0,S:20,M:35,L:25,XL:15,XXL:5,XXXL:0});
-  const [skus, setSkus] = useLocalState("size_skus", Array(6).fill(null).map((_,i)=>({name:`SKU ${i+1}`,forecast:"",cogsPerUnit:""})));
+  const [cogsMap, setCogsMap] = useLocalState("size_cogs", {});
   const updRatio = (sz,v) => setRatios(r=>({...r,[sz]:parseFloat(v)||0}));
-  const updSku = (i,k,v) => setSkus(s=>s.map((r,idx)=>idx===i?{...r,[k]:v}:r));
+  const updCogs = (name,v) => setCogsMap(m=>({...m,[name]:v}));
   const totalRatio = Object.values(ratios).reduce((a,b)=>a+b,0);
+
+  // Auto-pull from Forecast localStorage
+  const getForecastSkus = () => {
+    try {
+      const stored = localStorage.getItem("brandos_forecast_skus");
+      const forecastSkus = stored ? JSON.parse(stored) : [];
+      const seasons = (() => { try { return JSON.parse(localStorage.getItem("brandos_forecast_seasons")||"[]"); } catch { return []; } })();
+      const month = (() => { try { return JSON.parse(localStorage.getItem("brandos_forecast_month")||"3"); } catch { return 3; } })();
+      const sm = seasons[month]?.mult || 1;
+      const bs = (() => { try { return parseFloat(JSON.parse(localStorage.getItem("brandos_forecast_bs")||"25"))/100; } catch { return 0.25; } })();
+      const fm = (() => { try { return parseFloat(JSON.parse(localStorage.getItem("brandos_forecast_fm")||"10"))/100; } catch { return 0.10; } })();
+      const tr = (() => { try { return parseFloat(JSON.parse(localStorage.getItem("brandos_forecast_traffic")||"5"))/100; } catch { return 0.05; } })();
+      const ss = (() => { try { return parseFloat(JSON.parse(localStorage.getItem("brandos_forecast_safety")||"15"))/100; } catch { return 0.15; } })();
+      return forecastSkus.filter(sk=>sk.name).map(sk => {
+        const sales = [parseFloat(sk.m1)||0, parseFloat(sk.m2)||0, parseFloat(sk.m3)||0].filter(v=>v>0);
+        const avg = sales.length ? sales.reduce((a,b)=>a+b,0)/sales.length : 0;
+        const buf = sk.cat==="Best Seller"?bs:sk.cat==="Fast Moving"?fm:tr;
+        const forecast = Math.ceil(avg * sm * (1+buf));
+        return {name: sk.name, forecast, cogsPerUnit: cogsMap[sk.name]||""};
+      });
+    } catch { return []; }
+  };
+  const skus = getForecastSkus();
 
   const breakdown = skus.map(sk => {
     const fc = f(sk.forecast)||0;
     const bySize = {};
     sizes.forEach(sz => { bySize[sz] = Math.ceil(fc * ratios[sz]/100); });
-    const cogsTotal = Object.values(bySize).reduce((a,b)=>a+b,0) * (f(sk.cogsPerUnit)||0);
+    const cogsTotal = Object.values(bySize).reduce((a,b)=>a+b,0) * (f(cogsMap[sk.name]||0));
     return {...sk, bySize, cogsTotal, total:Object.values(bySize).reduce((a,b)=>a+b,0)};
   });
 
@@ -332,12 +355,17 @@ function SizeModule() {
       </div>
 
       <Divider label="SKU Forecast Input"/>
+      {skus.length === 0 && (
+        <div style={{padding:"20px",background:C.s1,border:`1px solid ${C.border2}`,borderRadius:2,marginBottom:16,textAlign:"center",color:C.dim,fontFamily:"'DM Mono',monospace",fontSize:11}}>
+          Belum ada SKU — isi nama produk di tab <span style={{color:C.gold}}>03 Forecast</span> dulu
+        </div>
+      )}
       <div style={{display:"grid",gridTemplateColumns:"repeat(3,1fr)",gap:10,marginBottom:16}}>
         {skus.map((sk,i)=>(
           <div key={i} style={{background:C.s1,border:`1px solid ${C.border2}`,borderRadius:2,padding:12}}>
-            <Field label="Nama SKU"><Input value={sk.name} onChange={v=>updSku(i,"name",v)} placeholder={`SKU ${i+1}`}/></Field>
-            <Field label="Forecast Unit"><Input value={sk.forecast} onChange={v=>updSku(i,"forecast",v)} type="number"/></Field>
-            <Field label="COGS/unit"><Input value={sk.cogsPerUnit} onChange={v=>updSku(i,"cogsPerUnit",v)} prefix="Rp" type="number"/></Field>
+            <div style={{fontSize:11,color:C.gold,fontFamily:"'DM Mono',monospace",fontWeight:700,marginBottom:8}}>{sk.name}</div>
+            <div style={{fontSize:10,color:C.mid,fontFamily:"'DM Mono',monospace",marginBottom:10}}>Forecast: <span style={{color:C.text,fontWeight:700}}>{Math.round(sk.forecast||0).toLocaleString("id-ID")} unit</span></div>
+            <Field label="COGS/unit"><Input value={cogsMap[sk.name]||""} onChange={v=>updCogs(sk.name,v)} prefix="Rp" type="number"/></Field>
           </div>
         ))}
       </div>
@@ -378,8 +406,23 @@ function SizeModule() {
 // ─── MODULE 4: BCG MATRIX ─────────────────────────────────────────────────────
 function BCGModule() {
   const [thresholds, setThresholds] = useLocalState("bcg_thresholds", {deadstock:90,slowmove:45,bestDio:20,ssrBest:2.0,revShareStar:0.15});
-  const [skus, setSkus] = useLocalState("bcg_skus", Array(10).fill(null).map((_,i)=>({name:`SKU ${i+1}`,units30:"",units90:"",stock:"",price:"",cogs:""})));
-  const updSku = (i,k,v) => setSkus(s=>s.map((r,idx)=>idx===i?{...r,[k]:v}:r));
+  const [skuData, setSkuData] = useLocalState("bcg_skus", {});
+  
+  // Auto-pull SKU names from Forecast, merge with saved BCG data
+  const getForecastNames = () => {
+    try {
+      const stored = localStorage.getItem("brandos_forecast_skus");
+      const fSkus = stored ? JSON.parse(stored) : [];
+      return fSkus.filter(sk=>sk.name).map(sk=>sk.name);
+    } catch { return []; }
+  };
+  const forecastNames = getForecastNames();
+  const allNames = [...new Set([...forecastNames, ...Object.keys(skuData)])].filter(Boolean);
+  const skus = allNames.length > 0 ? allNames.map(name => ({name, ...(skuData[name]||{units30:"",units90:"",stock:"",price:"",cogs:""})})) : Array(6).fill(null).map((_,i)=>({name:`SKU ${i+1}`,units30:"",units90:"",stock:"",price:"",cogs:""}));
+  const updSku = (i,k,v) => {
+    const name = skus[i].name;
+    setSkuData(d=>({...d,[name]:{...(d[name]||{}), [k]:v}}));
+  };
 
   const totalRev30 = skus.reduce((a,sk)=>(f(sk.units30)||0)*(f(sk.price)||0)+a,0);
 
@@ -430,7 +473,7 @@ function BCGModule() {
           <tbody>
             {skus.map((sk,i)=>(
               <tr key={i} style={{borderBottom:`1px solid ${C.border}20`}}>
-                <td style={{padding:"5px 6px"}}><input value={sk.name} onChange={e=>updSku(i,"name",e.target.value)} placeholder={`SKU ${i+1}`} style={{background:"transparent",border:"none",outline:"none",color:C.text,fontFamily:"'DM Mono',monospace",fontSize:11,width:100}}/></td>
+                <td style={{padding:"5px 6px"}}><input value={sk.name} onChange={e=>updSku(i,"name",e.target.value)} placeholder={`SKU ${i+1}`} style={{background:"transparent",border:"none",outline:"none",color:forecastNames.includes(sk.name)?C.gold:C.text,fontFamily:"'DM Mono',monospace",fontSize:11,width:100}}/></td>
                 {["units30","units90","stock","price","cogs"].map(k=>(
                   <td key={k} style={{padding:"5px 6px"}}><input type="number" value={sk[k]} onChange={e=>updSku(i,k,e.target.value)} placeholder="0" style={{background:"transparent",border:"none",outline:"none",color:C.text,fontFamily:"'DM Mono',monospace",fontSize:11,width:80,textAlign:"right"}}/></td>
                 ))}
@@ -549,7 +592,7 @@ function AdPerfModule() {
           <tbody>
             {skus.map((sk,i)=>(
               <tr key={i} style={{borderBottom:`1px solid ${C.border}20`}}>
-                <td style={{padding:"5px 6px"}}><input value={sk.name} onChange={e=>updSku(i,"name",e.target.value)} placeholder={`SKU ${i+1}`} style={{background:"transparent",border:"none",outline:"none",color:C.text,fontFamily:"'DM Mono',monospace",fontSize:11,width:100}}/></td>
+                <td style={{padding:"5px 6px"}}><input value={sk.name} onChange={e=>updSku(i,"name",e.target.value)} placeholder={`SKU ${i+1}`} style={{background:"transparent",border:"none",outline:"none",color:forecastNames.includes(sk.name)?C.gold:C.text,fontFamily:"'DM Mono',monospace",fontSize:11,width:100}}/></td>
                 {["spend","impresi","klik","atc","checkout","revenue"].map(k=>(
                   <td key={k} style={{padding:"5px 6px"}}><input type="number" value={sk[k]} onChange={e=>updSku(i,k,e.target.value)} placeholder="0" style={{background:"transparent",border:"none",outline:"none",color:C.text,fontFamily:"'DM Mono',monospace",fontSize:11,width:80,textAlign:"right"}}/></td>
                 ))}
@@ -600,10 +643,36 @@ function AdPerfModule() {
 // ─── MODULE 6: PRODUCT TRACKER ────────────────────────────────────────────────
 function ProdTrackModule() {
   const months = ["Jan","Feb","Mar","Apr","Mei","Jun","Jul","Agu","Sep","Okt","Nov","Des"];
-  const [skus, setSkus] = useLocalState("tracker_skus", Array(6).fill(null).map((_,i)=>({name:`SKU ${i+1}`,data:Array(12).fill("")})));
+  const [trackerData, setTrackerData] = useLocalState("tracker_data", {});
   const [view, setView] = useLocalState("tracker_view", "revenue");
-  const updSku = (i,k,v) => setSkus(s=>s.map((r,idx)=>idx===i?{...r,[k]:v}:r));
-  const updData = (i,j,v) => setSkus(s=>s.map((r,idx)=>idx===i?{...r,data:r.data.map((d,di)=>di===j?v:d)}:r));
+
+  // Auto-pull SKU names from Forecast
+  const getForecastNames = () => {
+    try {
+      const stored = localStorage.getItem("brandos_forecast_skus");
+      const fSkus = stored ? JSON.parse(stored) : [];
+      return fSkus.filter(sk=>sk.name).map(sk=>sk.name);
+    } catch { return []; }
+  };
+  const forecastNames = getForecastNames();
+  const allNames = [...new Set([...forecastNames, ...Object.keys(trackerData)])].filter(Boolean);
+  const skus = allNames.length > 0
+    ? allNames.map(name => ({name, data:(trackerData[name]||Array(12).fill(""))}))
+    : Array(6).fill(null).map((_,i)=>({name:`SKU ${i+1}`,data:Array(12).fill("")}));
+
+  const updData = (i,j,v) => {
+    const name = skus[i].name;
+    const cur = trackerData[name] || Array(12).fill("");
+    const next = cur.map((d,di)=>di===j?v:d);
+    setTrackerData(d=>({...d,[name]:next}));
+  };
+  const updSku = (i,k,v) => {
+    if(k==="name") {
+      const oldName = skus[i].name;
+      const oldData = trackerData[oldName] || Array(12).fill("");
+      setTrackerData(d=>{const n={...d}; delete n[oldName]; n[v]=oldData; return n;});
+    }
+  };
 
   const analyzed = skus.map(sk => {
     const vals = sk.data.map(d=>f(d)||0);
@@ -639,7 +708,7 @@ function ProdTrackModule() {
             {analyzed.map((r,i)=>(
               <tr key={i} style={{borderBottom:`1px solid ${C.border}20`,background:i%2===0?C.s1:C.s2}}>
                 <td style={{padding:"5px 6px"}}>
-                  <input value={r.name} onChange={e=>updSku(i,"name",e.target.value)} style={{background:"transparent",border:"none",outline:"none",color:C.text,fontFamily:"'DM Mono',monospace",fontSize:11,width:90}}/>
+                  <input value={r.name} onChange={e=>updSku(i,"name",e.target.value)} style={{background:"transparent",border:"none",outline:"none",color:forecastNames.includes(r.name)?C.gold:C.text,fontFamily:"'DM Mono',monospace",fontSize:11,width:90}}/>
                 </td>
                 {r.data.map((d,j)=>{
                   const v = f(d)||0;
