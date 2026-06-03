@@ -1,4 +1,4 @@
-import { useState, useCallback } from "react";
+import { useState, useCallback, useEffect, useRef } from "react";
 
 // ─── TOKENS ──────────────────────────────────────────────────────────────────
 const C = {
@@ -16,6 +16,25 @@ const IDR = (n) => n ? "Rp " + Math.round(n).toLocaleString("id-ID") : "Rp 0";
 const PCT = (n) => isNaN(n)||!isFinite(n) ? "0.0%" : n.toFixed(1) + "%";
 const NUM = (n) => Math.round(n||0).toLocaleString("id-ID");
 const f = parseFloat;
+
+
+// ─── LOCALSTORAGE HOOK ────────────────────────────────────────────────────────
+function useLocalState(key, defaultValue) {
+  const [state, setState] = useState(() => {
+    try {
+      const stored = localStorage.getItem("brandos_" + key);
+      return stored ? JSON.parse(stored) : defaultValue;
+    } catch { return defaultValue; }
+  });
+  const setAndStore = useCallback((val) => {
+    setState(prev => {
+      const next = typeof val === "function" ? val(prev) : val;
+      try { localStorage.setItem("brandos_" + key, JSON.stringify(next)); } catch {}
+      return next;
+    });
+  }, [key]);
+  return [state, setAndStore];
+}
 
 // ─── SHARED UI ───────────────────────────────────────────────────────────────
 const Label = ({c, children}) => <div style={{fontSize:10,letterSpacing:"0.16em",textTransform:"uppercase",color:c||C.mid,fontFamily:"'DM Mono',monospace",marginBottom:6}}>{children}</div>;
@@ -85,7 +104,7 @@ const BCG_COLORS = {"⭐ STAR":C.gold,"🐄 CASH COW":C.green,"❓ QUESTION MARK
 
 // ─── MODULE 1: CANVAS ────────────────────────────────────────────────────────
 function CanvasModule() {
-  const [d, setD] = useState({brandName:"",tagline:"",category:"",founded:"",keyPartners:"",keyActivities:"",keyResources:"",valueProposition:"",custRelationship:"",channels:"",custSegments:"",costStructure:"",revenueStreams:"",unfairAdvantage:"",problemSolving:"",keyMetrics:""});
+  const [d, setD] = useLocalState("canvas", {brandName:"",tagline:"",category:"",founded:"",keyPartners:"",keyActivities:"",keyResources:"",valueProposition:"",custRelationship:"",channels:"",custSegments:"",costStructure:"",revenueStreams:"",unfairAdvantage:"",problemSolving:"",keyMetrics:""});
   const s = k => v => setD(p=>({...p,[k]:v}));
   const blocks = [
     {key:"keyPartners",label:"Key Partners",color:"#6b5a9e",cs:0,ce:1,rs:0,re:1,hint:"Supplier, mitra distribusi, vendor kritis"},
@@ -143,12 +162,12 @@ function CanvasModule() {
 
 // ─── MODULE 2: FORECAST + SEASONALITY ────────────────────────────────────────
 function ForecastModule() {
-  const [seasons, setSeasons] = useState(DEFAULT_SEASONS);
-  const [selectedMonth, setSelectedMonth] = useState(3); // Apr = index 3
-  const [bsBuffer, setBsBuffer] = useState("25"); const [fmBuffer, setFmBuffer] = useState("10");
-  const [trafficBuffer, setTrafficBuffer] = useState("5"); const [safetyBuffer, setSafetyBuffer] = useState("15");
+  const [seasons, setSeasons] = useLocalState("forecast_seasons", DEFAULT_SEASONS);
+  const [selectedMonth, setSelectedMonth] = useLocalState("forecast_month", 3);
+  const [bsBuffer, setBsBuffer] = useLocalState("forecast_bs", "25"); const [fmBuffer, setFmBuffer] = useLocalState("forecast_fm", "10");
+  const [trafficBuffer, setTrafficBuffer] = useLocalState("forecast_traffic", "5"); const [safetyBuffer, setSafetyBuffer] = useLocalState("forecast_safety", "15");
   const emptySku = () => ({name:"",cat:"Best Seller",m1:"",m2:"",m3:"",price:"",cogs:"",stock:"",lead:"14"});
-  const [skus, setSkus] = useState(Array(8).fill(null).map(emptySku));
+  const [skus, setSkus] = useLocalState("forecast_skus", Array(8).fill(null).map(emptySku));
   const [result, setResult] = useState(null);
 
   const updSku = (i,k,v) => setSkus(s=>s.map((r,idx)=>idx===i?{...r,[k]:v}:r));
@@ -284,8 +303,8 @@ function ForecastModule() {
 // ─── MODULE 3: SIZE BREAKDOWN ─────────────────────────────────────────────────
 function SizeModule() {
   const sizes = ["XXS","XS","S","M","L","XL","XXL","XXXL"];
-  const [ratios, setRatios] = useState({XXS:0,XS:0,S:20,M:35,L:25,XL:15,XXL:5,XXXL:0});
-  const [skus, setSkus] = useState(Array(6).fill(null).map((_,i)=>({name:`SKU ${i+1}`,forecast:"",cogsPerUnit:""})));
+  const [ratios, setRatios] = useLocalState("size_ratios", {XXS:0,XS:0,S:20,M:35,L:25,XL:15,XXL:5,XXXL:0});
+  const [skus, setSkus] = useLocalState("size_skus", Array(6).fill(null).map((_,i)=>({name:`SKU ${i+1}`,forecast:"",cogsPerUnit:""})));
   const updRatio = (sz,v) => setRatios(r=>({...r,[sz]:parseFloat(v)||0}));
   const updSku = (i,k,v) => setSkus(s=>s.map((r,idx)=>idx===i?{...r,[k]:v}:r));
   const totalRatio = Object.values(ratios).reduce((a,b)=>a+b,0);
@@ -358,8 +377,8 @@ function SizeModule() {
 
 // ─── MODULE 4: BCG MATRIX ─────────────────────────────────────────────────────
 function BCGModule() {
-  const [thresholds, setThresholds] = useState({deadstock:90,slowmove:45,bestDio:20,ssrBest:2.0,revShareStar:0.15});
-  const [skus, setSkus] = useState(Array(10).fill(null).map((_,i)=>({name:`SKU ${i+1}`,units30:"",units90:"",stock:"",price:"",cogs:""})));
+  const [thresholds, setThresholds] = useLocalState("bcg_thresholds", {deadstock:90,slowmove:45,bestDio:20,ssrBest:2.0,revShareStar:0.15});
+  const [skus, setSkus] = useLocalState("bcg_skus", Array(10).fill(null).map((_,i)=>({name:`SKU ${i+1}`,units30:"",units90:"",stock:"",price:"",cogs:""})));
   const updSku = (i,k,v) => setSkus(s=>s.map((r,idx)=>idx===i?{...r,[k]:v}:r));
 
   const totalRev30 = skus.reduce((a,sk)=>(f(sk.units30)||0)*(f(sk.price)||0)+a,0);
@@ -472,9 +491,9 @@ function BCGModule() {
 
 // ─── MODULE 5: AD PERFORMANCE ─────────────────────────────────────────────────
 function AdPerfModule() {
-  const [thresholds, setThresholds] = useState({ctr:2,cvr:3,atc:8,roas:3,cpc:2500});
+  const [thresholds, setThresholds] = useLocalState("adperf_thresholds", {ctr:2,cvr:3,atc:8,roas:3,cpc:2500});
   const emptySku = () => ({name:"",spend:"",impresi:"",klik:"",atc:"",checkout:"",revenue:""});
-  const [skus, setSkus] = useState(Array(6).fill(null).map(emptySku));
+  const [skus, setSkus] = useLocalState("adperf_skus", Array(6).fill(null).map(emptySku));
   const updSku = (i,k,v) => setSkus(s=>s.map((r,idx)=>idx===i?{...r,[k]:v}:r));
 
   const calc = skus.map(sk => {
@@ -581,8 +600,8 @@ function AdPerfModule() {
 // ─── MODULE 6: PRODUCT TRACKER ────────────────────────────────────────────────
 function ProdTrackModule() {
   const months = ["Jan","Feb","Mar","Apr","Mei","Jun","Jul","Agu","Sep","Okt","Nov","Des"];
-  const [skus, setSkus] = useState(Array(6).fill(null).map((_,i)=>({name:`SKU ${i+1}`,data:Array(12).fill("")})));
-  const [view, setView] = useState("revenue");
+  const [skus, setSkus] = useLocalState("tracker_skus", Array(6).fill(null).map((_,i)=>({name:`SKU ${i+1}`,data:Array(12).fill("")})));
+  const [view, setView] = useLocalState("tracker_view", "revenue");
   const updSku = (i,k,v) => setSkus(s=>s.map((r,idx)=>idx===i?{...r,[k]:v}:r));
   const updData = (i,j,v) => setSkus(s=>s.map((r,idx)=>idx===i?{...r,data:r.data.map((d,di)=>di===j?v:d)}:r));
 
@@ -666,7 +685,7 @@ function ProdTrackModule() {
 
 // ─── MODULE 7: UNIT ECONOMICS ─────────────────────────────────────────────────
 function UnitEconModule() {
-  const [d, setD] = useState({rev:"",cogs:"47",tRev:"",sRev:"",kRev:"",oRev:"",tFee:"8",sFee:"10",kFee:"7",oFee:"30",ads:"",aff:"5",ret:"3",sdm:"",ops:"",rent:"",price:"",ucogs:"",pkg:""});
+  const [d, setD] = useLocalState("unitecon", {rev:"",cogs:"47",tRev:"",sRev:"",kRev:"",oRev:"",tFee:"8",sFee:"10",kFee:"7",oFee:"30",ads:"",aff:"5",ret:"3",sdm:"",ops:"",rent:"",price:"",ucogs:"",pkg:""});
   const s = k => v => setD(p=>({...p,[k]:v}));
   const [calc, setCalc] = useState(null);
 
@@ -802,9 +821,9 @@ function DashboardModule() {
 
 // ─── PLAN MODULE ─────────────────────────────────────────────────────────────
 function PlanModule() {
-  const [d, setD] = useState({vision:"",mission:"",goal12:"",goal3yr:"",targetMarket:"",marketSize:"",competitors:"",differentiator:"",positioning:""});
-  const [milestones, setMilestones] = useState(Array(6).fill(null).map((_,i)=>({month:`Bulan ${i+1}`,revenue:"",initiative:"",kpi:""})));
-  const [risks, setRisks] = useState(Array(3).fill(null).map((_,i)=>({risk:"",prob:"",impact:"",mitigation:""})));
+  const [d, setD] = useLocalState("plan_main", {vision:"",mission:"",goal12:"",goal3yr:"",targetMarket:"",marketSize:"",competitors:"",differentiator:"",positioning:""});
+  const [milestones, setMilestones] = useLocalState("plan_milestones", Array(6).fill(null).map((_,i)=>({month:`Bulan ${i+1}`,revenue:"",initiative:"",kpi:""})));
+  const [risks, setRisks] = useLocalState("plan_risks", Array(3).fill(null).map((_,i)=>({risk:"",prob:"",impact:"",mitigation:""})));
   const s = k => v => setD(p=>({...p,[k]:v}));
   const updM = (i,k,v) => setMilestones(m=>m.map((r,idx)=>idx===i?{...r,[k]:v}:r));
   const updR = (i,k,v) => setRisks(r=>r.map((rr,idx)=>idx===i?{...rr,[k]:v}:rr));
@@ -886,10 +905,13 @@ export default function App() {
           <span style={{fontSize:18,fontFamily:"'Cormorant Garamond',serif",fontWeight:700,color:C.text}}>Brand OS</span>
           <span style={{fontSize:9,letterSpacing:"0.14em",color:C.dim,fontFamily:"'DM Mono',monospace"}}>v2.0</span>
         </div>
-        <div style={{display:"flex",gap:4}}>
-          {TABS.map(t=>(
-            <div key={t.id} style={{width:5,height:5,borderRadius:"50%",background:tab===t.id?C.gold:C.border2}}/>
-          ))}
+        <div style={{display:"flex",alignItems:"center",gap:16}}>
+          <button onClick={()=>{if(window.confirm("Reset semua data? Tidak bisa di-undo.")){Object.keys(localStorage).filter(k=>k.startsWith("brandos_")).forEach(k=>localStorage.removeItem(k));window.location.reload();}}} style={{background:"transparent",border:`1px solid ${C.border2}`,color:C.dim,fontFamily:"'DM Mono',monospace",fontSize:9,letterSpacing:"0.12em",padding:"4px 10px",cursor:"pointer",borderRadius:2}}>RESET DATA</button>
+          <div style={{display:"flex",gap:4}}>
+            {TABS.map(t=>(
+              <div key={t.id} style={{width:5,height:5,borderRadius:"50%",background:tab===t.id?C.gold:C.border2}}/>
+            ))}
+          </div>
         </div>
       </div>
 
@@ -902,17 +924,17 @@ export default function App() {
         ))}
       </div>
 
-      {/* Content */}
+      {/* Content — keep all mounted, hide inactive tabs */}
       <div style={{padding:"28px 32px",maxWidth:1400,margin:"0 auto"}}>
-        {tab==="canvas"    && <CanvasModule/>}
-        {tab==="plan"      && <PlanModule/>}
-        {tab==="forecast"  && <ForecastModule/>}
-        {tab==="size"      && <SizeModule/>}
-        {tab==="bcg"       && <BCGModule/>}
-        {tab==="adperf"    && <AdPerfModule/>}
-        {tab==="tracker"   && <ProdTrackModule/>}
-        {tab==="economics" && <UnitEconModule/>}
-        {tab==="dashboard" && <DashboardModule/>}
+        <div style={{display:tab==="canvas"?"block":"none"}}><CanvasModule/></div>
+        <div style={{display:tab==="plan"?"block":"none"}}><PlanModule/></div>
+        <div style={{display:tab==="forecast"?"block":"none"}}><ForecastModule/></div>
+        <div style={{display:tab==="size"?"block":"none"}}><SizeModule/></div>
+        <div style={{display:tab==="bcg"?"block":"none"}}><BCGModule/></div>
+        <div style={{display:tab==="adperf"?"block":"none"}}><AdPerfModule/></div>
+        <div style={{display:tab==="tracker"?"block":"none"}}><ProdTrackModule/></div>
+        <div style={{display:tab==="economics"?"block":"none"}}><UnitEconModule/></div>
+        <div style={{display:tab==="dashboard"?"block":"none"}}><DashboardModule/></div>
       </div>
     </div>
   );
