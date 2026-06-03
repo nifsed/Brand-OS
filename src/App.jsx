@@ -249,7 +249,7 @@ function ForecastModule() {
         </table>
       </div>
       <div style={{display:"flex",gap:8,marginBottom:20}}>
-        <Btn secondary onClick={()=>setSkus(s=>[...s,emptySku()])}>+ SKU</Btn>
+        <Btn secondary onClick={()=>{const newName=`SKU ${skus.length+1}`;setAdData(d=>({...d,[newName]:emptySku()}));}}>+ SKU</Btn>
         <Btn onClick={calculate}>Hitung Forecast →</Btn>
       </div>
 
@@ -534,9 +534,30 @@ function BCGModule() {
 // ─── MODULE 5: AD PERFORMANCE ─────────────────────────────────────────────────
 function AdPerfModule() {
   const [thresholds, setThresholds] = useLocalState("adperf_thresholds", {ctr:2,cvr:3,atc:8,roas:3,cpc:2500});
-  const emptySku = () => ({name:"",spend:"",impresi:"",klik:"",atc:"",checkout:"",revenue:""});
-  const [skus, setSkus] = useLocalState("adperf_skus", Array(6).fill(null).map(emptySku));
-  const updSku = (i,k,v) => setSkus(s=>s.map((r,idx)=>idx===i?{...r,[k]:v}:r));
+  const [adData, setAdData] = useLocalState("adperf_data", {});
+
+  // Auto-pull SKU names from Forecast
+  const forecastNames = (() => {
+    try {
+      const stored = localStorage.getItem("brandos_forecast_skus");
+      const fSkus = stored ? JSON.parse(stored) : [];
+      return fSkus.filter(sk=>sk.name).map(sk=>sk.name);
+    } catch { return []; }
+  })();
+  const emptySku = () => ({spend:"",impresi:"",klik:"",atc:"",checkout:"",revenue:""});
+  const adAllNames = [...new Set([...forecastNames, ...Object.keys(adData)])].filter(Boolean);
+  const skus = adAllNames.length > 0
+    ? adAllNames.map(name => ({name, ...(adData[name]||emptySku())}))
+    : Array(6).fill(null).map((_,i) => ({name:`SKU ${i+1}`, ...emptySku()}));
+  const updSku = (i,k,v) => {
+    const name = skus[i].name;
+    if(k==="name") {
+      const oldData = adData[skus[i].name]||emptySku();
+      setAdData(d=>{const n={...d}; delete n[skus[i].name]; n[v]=oldData; return n;});
+    } else {
+      setAdData(d=>({...d,[name]:{...(d[name]||emptySku()),[k]:v}}));
+    }
+  };
 
   const calc = skus.map(sk => {
     const spend=f(sk.spend)||0, imp=f(sk.impresi)||0, klik=f(sk.klik)||0;
@@ -595,13 +616,13 @@ function AdPerfModule() {
                 {["spend","impresi","klik","atc","checkout","revenue"].map(k=>(
                   <td key={k} style={{padding:"5px 6px"}}><input type="number" value={sk[k]} onChange={e=>updSku(i,k,e.target.value)} placeholder="0" style={{background:"transparent",border:"none",outline:"none",color:C.text,fontFamily:"'DM Mono',monospace",fontSize:11,width:80,textAlign:"right"}}/></td>
                 ))}
-                <td><button onClick={()=>setSkus(s=>s.filter((_,idx)=>idx!==i))} style={{background:"none",border:"none",color:C.dim,cursor:"pointer",fontSize:14}}>×</button></td>
+                <td><button onClick={()=>{const name=skus[i].name;setAdData(d=>{const n={...d};delete n[name];return n;});}} style={{background:"none",border:"none",color:C.dim,cursor:"pointer",fontSize:14}}>×</button></td>
               </tr>
             ))}
           </tbody>
         </table>
       </div>
-      <Btn secondary onClick={()=>setSkus(s=>[...s,emptySku()])}>+ SKU</Btn>
+      <Btn secondary onClick={()=>{const newName=`SKU ${skus.length+1}`;setAdData(d=>({...d,[newName]:emptySku()}));}}>+ SKU</Btn>
 
       <Divider label="Performance Analysis"/>
       <div style={{display:"grid",gridTemplateColumns:"repeat(4,1fr)",gap:10,marginBottom:20}}>
@@ -936,6 +957,77 @@ function PlanModule() {
   );
 }
 
+// ─── PASSWORD GATE ────────────────────────────────────────────────────────────
+const APP_PASSWORD = "brandos2024"; // Ganti password di sini
+
+function PasswordGate({onUnlock}) {
+  const [input, setInput] = useState("");
+  const [error, setError] = useState(false);
+  const [shake, setShake] = useState(false);
+
+  const attempt = () => {
+    if (input === APP_PASSWORD) {
+      try { localStorage.setItem("brandos_auth", "1"); } catch {}
+      onUnlock();
+    } else {
+      setError(true);
+      setShake(true);
+      setTimeout(() => setShake(false), 500);
+      setInput("");
+    }
+  };
+
+  return (
+    <div style={{minHeight:"100vh",background:C.bg,display:"flex",alignItems:"center",justifyContent:"center",fontFamily:"'DM Mono',monospace"}}>
+      <style>{`
+        @import url('https://fonts.googleapis.com/css2?family=DM+Mono:wght@300;400;500&family=Cormorant+Garamond:wght@400;600;700&display=swap');
+        *{box-sizing:border-box;margin:0;padding:0;}
+        input{color-scheme:dark;}
+        @keyframes shake {
+          0%,100%{transform:translateX(0)}
+          20%,60%{transform:translateX(-8px)}
+          40%,80%{transform:translateX(8px)}
+        }
+        @keyframes fadeIn {
+          from{opacity:0;transform:translateY(16px)}
+          to{opacity:1;transform:translateY(0)}
+        }
+      `}</style>
+      <div style={{width:"100%",maxWidth:380,padding:"0 24px",animation:"fadeIn 0.5s ease"}}>
+        {/* Logo */}
+        <div style={{textAlign:"center",marginBottom:40}}>
+          <div style={{fontSize:9,letterSpacing:"0.24em",textTransform:"uppercase",color:C.goldDim,marginBottom:8}}>Bill & Board Group</div>
+          <div style={{fontSize:32,fontFamily:"'Cormorant Garamond',serif",fontWeight:700,color:C.text,letterSpacing:"-0.02em"}}>Brand OS</div>
+          <div style={{fontSize:9,letterSpacing:"0.14em",color:C.dim,marginTop:4}}>v2.0 — Complete Business Toolkit</div>
+        </div>
+
+        {/* Gate */}
+        <div style={{background:C.s1,border:`1px solid ${C.border2}`,borderRadius:3,padding:"28px 24px",animation:shake?"shake 0.4s ease":"none"}}>
+          <div style={{fontSize:10,letterSpacing:"0.16em",textTransform:"uppercase",color:C.mid,marginBottom:16,textAlign:"center"}}>Masukkan Access Password</div>
+          <input
+            type="password"
+            value={input}
+            onChange={e=>{setInput(e.target.value);setError(false);}}
+            onKeyDown={e=>e.key==="Enter"&&attempt()}
+            placeholder="••••••••••"
+            autoFocus
+            style={{width:"100%",background:C.bg,border:`1px solid ${error?C.red:C.border2}`,borderRadius:2,padding:"12px 14px",color:C.text,fontFamily:"'DM Mono',monospace",fontSize:16,outline:"none",textAlign:"center",letterSpacing:"0.2em",marginBottom:error?8:16,transition:"border-color 0.2s"}}
+          />
+          {error && <div style={{fontSize:11,color:C.red,textAlign:"center",marginBottom:12,letterSpacing:"0.1em"}}>Password salah. Coba lagi.</div>}
+          <button onClick={attempt} style={{width:"100%",padding:"13px",background:C.gold,border:"none",borderRadius:2,color:"#0b0a08",fontSize:11,letterSpacing:"0.18em",textTransform:"uppercase",fontFamily:"'DM Mono',monospace",cursor:"pointer",fontWeight:700}}>
+            Masuk →
+          </button>
+        </div>
+
+        <div style={{textAlign:"center",marginTop:20,fontSize:10,color:C.dim,lineHeight:1.6}}>
+          Belum punya password?<br/>
+          <span style={{color:C.goldDim}}>Beli di Lynk.id untuk dapat akses</span>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 // ─── MAIN APP ─────────────────────────────────────────────────────────────────
 const TABS = [
   {id:"canvas",    label:"Canvas",     num:"01"},
@@ -951,6 +1043,11 @@ const TABS = [
 
 export default function App() {
   const [tab, setTab] = useState("canvas");
+  const [unlocked, setUnlocked] = useState(() => {
+    try { return localStorage.getItem("brandos_auth") === "1"; } catch { return false; }
+  });
+
+  if (!unlocked) return <PasswordGate onUnlock={() => setUnlocked(true)} />;
   return (
     <div style={{minHeight:"100vh",background:C.bg,color:C.text}}>
       <style>{`
