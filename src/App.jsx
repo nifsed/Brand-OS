@@ -409,14 +409,13 @@ function BCGModule() {
   const [skuData, setSkuData] = useLocalState("bcg_skus", {});
   
   // Auto-pull SKU names from Forecast, merge with saved BCG data
-  const getForecastNames = () => {
+  const forecastNames = (() => {
     try {
       const stored = localStorage.getItem("brandos_forecast_skus");
       const fSkus = stored ? JSON.parse(stored) : [];
       return fSkus.filter(sk=>sk.name).map(sk=>sk.name);
     } catch { return []; }
-  };
-  const forecastNames = getForecastNames();
+  })();
   const allNames = [...new Set([...forecastNames, ...Object.keys(skuData)])].filter(Boolean);
   const skus = allNames.length > 0 ? allNames.map(name => ({name, ...(skuData[name]||{units30:"",units90:"",stock:"",price:"",cogs:""})})) : Array(6).fill(null).map((_,i)=>({name:`SKU ${i+1}`,units30:"",units90:"",stock:"",price:"",cogs:""}));
   const updSku = (i,k,v) => {
@@ -647,14 +646,13 @@ function ProdTrackModule() {
   const [view, setView] = useLocalState("tracker_view", "revenue");
 
   // Auto-pull SKU names from Forecast
-  const getForecastNames = () => {
+  const forecastNames = (() => {
     try {
       const stored = localStorage.getItem("brandos_forecast_skus");
       const fSkus = stored ? JSON.parse(stored) : [];
       return fSkus.filter(sk=>sk.name).map(sk=>sk.name);
     } catch { return []; }
-  };
-  const forecastNames = getForecastNames();
+  })();
   const allNames = [...new Set([...forecastNames, ...Object.keys(trackerData)])].filter(Boolean);
   const skus = allNames.length > 0
     ? allNames.map(name => ({name, data:(trackerData[name]||Array(12).fill(""))}))
