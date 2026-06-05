@@ -1309,7 +1309,7 @@ function BusinessPlan() {
   return (
     <div>
       <h2 style={{ fontSize: 15, fontWeight: 600, marginBottom: 4, fontFamily: FONT_MONO, letterSpacing: "0.04em", color: C.text }}>Business Plan</h2>
-      <p style={{ fontSize: 12, color: C.textMuted, fontFamily: FONT_MONO, marginBottom: 24 }}>Dokumentasi rencana bisnis terstruktur.</p>
+      <p style={{ fontSize: 11, color: C.textSecondary, fontFamily: FONT_MONO, marginBottom: 20, letterSpacing: "0.03em" }}>Dokumentasi rencana bisnis terstruktur.</p>
       {sections.map((s) => (
         <div key={s.key} style={styles.card}>
           <div style={styles.cardTitle}>{s.label}</div>
@@ -1318,35 +1318,10 @@ function BusinessPlan() {
             style={{ ...styles.input, height: 120, resize: "vertical", fontFamily: FONT_SANS, fontSize: 12, lineHeight: 1.6 }} />
         </div>
       ))}
-
-      {/* -- Strategic Action Plan -- */}
-      <div style={styles.card}>
-        <div style={styles.cardTitle}>Action Plan - Marketing  x  Production  x  Finance</div>
-        <div style={{ display:"grid", gridTemplateColumns:"1fr 1fr 1fr", gap:14 }}>
-          {[{k:"marketing",l:"Marketing Plan"},{k:"production",l:"Production Plan"},{k:"finance",l:"Finance Plan"}].map(sec=>(
-            <div key={sec.k} style={{ border:`1px solid ${C.border}`, borderRadius:3, overflow:"hidden" }}>
-              <div style={{ background:C.surfaceAlt, padding:"8px 12px", fontSize:10, fontFamily:FONT_MONO, fontWeight:600, letterSpacing:"0.14em", textTransform:"uppercase", color:C.textSecondary, borderBottom:`1px solid ${C.border}` }}>
-                {sec.l}
-              </div>
-              <div style={{ padding:"10px 12px" }}>
-                {actionPlans[sec.k].length===0
-                  ? <div style={{ fontSize:11, color:C.textMuted, fontFamily:FONT_MONO }}>Tidak ada aksi mendesak.</div>
-                  : actionPlans[sec.k].map((p,j)=>(
-                      <div key={j} style={{ ...styles.alert(p.t), marginBottom:j<actionPlans[sec.k].length-1?8:0 }}>{p.msg}</div>
-                    ))
-                }
-              </div>
-            </div>
-          ))}
-        </div>
-      </div>      </div>
-
     </div>
   );
 }
 
-// --- SIZE BREAKDOWN ---------------------------------------------------------
-// Golden ratio configs
 const GOLDEN_CONFIGS = {
   menswear: {
     xs_xl: {
