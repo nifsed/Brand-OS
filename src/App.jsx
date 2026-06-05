@@ -1,528 +1,1811 @@
-import { useState, useCallback, useEffect, useRef } from "react";
+import { useState, useEffect } from "react";
 
-// ─── TOKENS ──────────────────────────────────────────────────────────────────
+// --- FONT INJECTION ----------------------------------------------------------
+const injectFonts = () => {
+  if (document.getElementById("brandos-fonts")) return;
+  const link = document.createElement("link");
+  link.id = "brandos-fonts";
+  link.rel = "stylesheet";
+  link.href = "https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500;600&family=IBM+Plex+Sans:wght@300;400;500;600&display=swap";
+  document.head.appendChild(link);
+  // Global input focus style
+  const style = document.createElement("style");
+  style.textContent = `
+    * { box-sizing: border-box; }
+    body { -webkit-font-smoothing: antialiased; }
+    input:focus, select:focus, textarea:focus {
+      border-color: #3d5a9e !important;
+      outline: none;
+      background: #ffffff !important;
+    }
+    input[type=number]::-webkit-inner-spin-button { opacity: 0.25; }
+    ::-webkit-scrollbar { width: 5px; height: 5px; }
+    ::-webkit-scrollbar-track { background: #f2f1ee; }
+    ::-webkit-scrollbar-thumb { background: #c8c6c0; border-radius: 2px; }
+    nav::-webkit-scrollbar { height: 2px; }
+    tr:hover > td { background: #f7f6f3 !important; transition: background 0.1s; }
+    button:hover { opacity: 0.75; cursor: pointer; }
+    select option { background: #ffffff; color: #1a1917; }
+    ::placeholder { color: #bbb9b3; }
+  `;
+  document.head.appendChild(style);
+};
+
+// --- PALETTE - Warm Light Professional --------------------------------------
+// Direction: Linear.app meets consulting firm - crisp, warm, restrained
 const C = {
-  bg: "#f5f2ee", s1: "#ffffff", s2: "#f9f7f4", s3: "#f0ece6",
-  gold: "#9b7b4a", goldDim: "#c4a882", goldBrt: "#7a5e32",
-  text: "#2c2825", mid: "#6b6259", dim: "#a89e92",
-  green: "#3d7a5a", greenBg: "#edf5f0",
-  orange: "#b5622a", orangeBg: "#fdf1ea",
-  red: "#a33a3a", redBg: "#fdf0f0",
-  blue: "#3a6ea8", blueBg: "#eef3fb",
-  border: "#e2dbd2", border2: "#d4ccc2",
+  // Base - warm off-white, not clinical white
+  bg:           "#f7f6f3",   // warm linen - easy on eyes all day
+  surface:      "#ffffff",   // pure white card
+  surfaceAlt:   "#f2f1ee",   // table header, subtle fills
+  surfaceHover: "#eceae6",   // hover state
+
+  // Borders - hairline, warm gray
+  border:       "#e4e2dc",
+  borderLight:  "#ece9e3",
+
+  // Typography - ink, not pure black
+  text:         "#1a1917",   // warm near-black
+  textSecondary:"#6b6860",   // secondary
+  textMuted:    "#a09e98",   // placeholder, labels
+
+  // Accent - deep slate blue, serious but not cold
+  accent:       "#3d5a9e",
+  accentLight:  "#eef1fa",
+  accentDim:    "#c8d1ec",
+
+  // Positive - forest, not neon green
+  positive:     "#2e6b47",
+  positiveLight:"#edf5f1",
+  positiveDim:  "#bcd9cb",
+
+  // Warning - warm amber
+  warning:      "#8a6220",
+  warningLight: "#fdf6ea",
+  warningDim:   "#e8d4a8",
+
+  // Negative - deep crimson, not screaming red
+  negative:     "#7d2e2e",
+  negativeLight:"#fdf0f0",
+  negativeDim:  "#e8c0c0",
+
+  // Aliases for backward compat
+  gold:         "#8a6220",
+  goldLight:    "#fdf6ea",
+  goldDim:      "#e8d4a8",
+  red:          "#7d2e2e",
+  redLight:     "#fdf0f0",
+  yellow:       "#8a6220",
+  yellowLight:  "#fdf6ea",
+  green:        "#2e6b47",
+  greenLight:   "#edf5f1",
 };
 
-const IDR = (n) => n ? "Rp " + Math.round(n).toLocaleString("id-ID") : "Rp 0";
-const PCT = (n) => isNaN(n)||!isFinite(n) ? "0.0%" : n.toFixed(1) + "%";
-const NUM = (n) => Math.round(n||0).toLocaleString("id-ID");
-const f = parseFloat;
+// --- HELPERS ---------------------------------------------------------------
+const fmt = (n) =>
+  n == null || isNaN(n) ? "-" : "Rp " + Number(n).toLocaleString("id-ID");
+const pct = (n) => (isNaN(n) ? "-" : (n * 100).toFixed(1) + "%");
+const num = (v) => parseFloat(v) || 0;
 
-
-// ─── LOCALSTORAGE HOOK ────────────────────────────────────────────────────────
-function useLocalState(key, defaultValue) {
-  const [state, setState] = useState(() => {
-    try {
-      const stored = localStorage.getItem("brandos_" + key);
-      return stored ? JSON.parse(stored) : defaultValue;
-    } catch { return defaultValue; }
-  });
-  const setAndStore = useCallback((val) => {
-    setState(prev => {
-      const next = typeof val === "function" ? val(prev) : val;
-      try { localStorage.setItem("brandos_" + key, JSON.stringify(next)); } catch {}
-      return next;
-    });
-  }, [key]);
-  return [state, setAndStore];
-}
-
-// ─── SHARED UI ───────────────────────────────────────────────────────────────
-const Label = ({c, children}) => <div style={{fontSize:10,letterSpacing:"0.16em",textTransform:"uppercase",color:c||C.mid,fontFamily:"'DM Mono',monospace",marginBottom:6}}>{children}</div>;
-const Divider = ({label}) => <div style={{display:"flex",alignItems:"center",gap:10,margin:"24px 0 18px"}}><div style={{flex:1,height:1,background:C.border}}/>{label&&<span style={{fontSize:9,letterSpacing:"0.2em",textTransform:"uppercase",color:C.dim,fontFamily:"'DM Mono',monospace"}}>{label}</span>}<div style={{flex:1,height:1,background:C.border}}/></div>;
-
-const Field = ({label, hint, children}) => (
-  <div style={{marginBottom:14}}>
-    <Label>{label}</Label>
-    {hint && <div style={{fontSize:10,color:C.dim,fontFamily:"'DM Mono',monospace",marginBottom:4}}>{hint}</div>}
-    {children}
-  </div>
-);
-
-const Input = ({value, onChange, type="text", placeholder, prefix, suffix, multiline, rows=3, small}) => {
-  const base = {background:C.s1,border:`1px solid ${C.border2}`,color:C.text,fontFamily:"'DM Mono',monospace",fontSize:small?11:13,outline:"none",width:"100%",boxSizing:"border-box"};
-  if (multiline) return <textarea value={value} onChange={e=>onChange(e.target.value)} placeholder={placeholder} rows={rows} style={{...base,padding:"9px 11px",resize:"vertical",borderRadius:2}}/>;
-  return (
-    <div style={{display:"flex",alignItems:"center",background:C.s1,border:`1px solid ${C.border2}`,borderRadius:2,overflow:"hidden"}}>
-      {prefix && <span style={{padding:"0 9px",color:C.dim,fontSize:11,fontFamily:"'DM Mono',monospace",borderRight:`1px solid ${C.border2}`,whiteSpace:"nowrap"}}>{prefix}</span>}
-      <input type={type} value={value} onChange={e=>onChange(e.target.value)} placeholder={placeholder||"0"} style={{...base,border:"none",padding:"9px 11px",flex:1,background:"transparent",borderRadius:0}}/>
-      {suffix && <span style={{padding:"0 9px",color:C.dim,fontSize:11,fontFamily:"'DM Mono',monospace",borderLeft:`1px solid ${C.border2}`,whiteSpace:"nowrap"}}>{suffix}</span>}
-    </div>
-  );
-};
-
-const Stat = ({label, value, sub, color, hi}) => (
-  <div style={{padding:"13px 15px",background:hi?C.s3:C.s1,border:`1px solid ${hi?C.gold+"50":C.border2}`,borderRadius:3}}>
-    <div style={{fontSize:9,letterSpacing:"0.16em",textTransform:"uppercase",color:hi?C.gold:C.dim,fontFamily:"'DM Mono',monospace",marginBottom:5}}>{label}</div>
-    <div style={{fontSize:18,fontFamily:"'Cormorant Garamond',serif",fontWeight:700,color:color||C.text,lineHeight:1}}>{value}</div>
-    {sub && <div style={{fontSize:10,color:C.dim,fontFamily:"'DM Mono',monospace",marginTop:3}}>{sub}</div>}
-  </div>
-);
-
-const Alert = ({type, label, note}) => {
-  const m = {ok:[C.green,C.greenBg,"✓"],warn:[C.orange,C.orangeBg,"!"],bad:[C.red,C.redBg,"✕"],info:[C.blue,C.blueBg,"→"]};
-  const [col,bg,icon] = m[type]||m.info;
-  return <div style={{display:"flex",gap:10,padding:"11px 13px",background:bg,border:`1px solid ${col}30`,borderRadius:2,marginBottom:8}}><span style={{color:col,fontFamily:"'DM Mono',monospace",minWidth:14,fontSize:12}}>{icon}</span><div><div style={{fontSize:10,letterSpacing:"0.1em",textTransform:"uppercase",color:col,fontFamily:"'DM Mono',monospace",marginBottom:2}}>{label}</div><div style={{fontSize:11,color:C.mid,fontFamily:"'DM Mono',monospace",lineHeight:1.6}}>{note}</div></div></div>;
-};
-
-const Btn = ({onClick, children, disabled, secondary}) => (
-  <button onClick={onClick} disabled={disabled} style={{padding:"12px 20px",background:disabled?"#2a2720":secondary?"transparent":C.gold,border:secondary?`1px solid ${C.border2}`:"none",borderRadius:2,color:disabled?C.dim:secondary?C.mid:"#0b0a08",fontSize:11,letterSpacing:"0.16em",textTransform:"uppercase",fontFamily:"'DM Mono',monospace",cursor:disabled?"not-allowed":"pointer",fontWeight:700,transition:"all 0.15s"}}>
-    {children}
-  </button>
-);
-
-const Tag = ({c, children}) => <span style={{display:"inline-block",padding:"2px 7px",background:(c||C.gold)+"18",border:`1px solid ${(c||C.gold)}40`,borderRadius:2,fontSize:9,color:c||C.gold,fontFamily:"'DM Mono',monospace",letterSpacing:"0.1em",marginRight:5,marginBottom:3}}>{children}</span>;
-
-// ─── SEASONALITY DATA ─────────────────────────────────────────────────────────
-const DEFAULT_SEASONS = [
-  {month:"Jan",mult:1.0,note:"Normal"},
-  {month:"Feb",mult:1.1,note:"Pra-Ramadan"},
-  {month:"Mar",mult:2.5,note:"Ramadan Peak"},
-  {month:"Apr",mult:3.5,note:"Lebaran Peak"},
-  {month:"Mei",mult:0.7,note:"Post-Lebaran"},
-  {month:"Jun",mult:0.6,note:"Decline"},
-  {month:"Jul",mult:0.8,note:"Recovery"},
-  {month:"Agu",mult:0.9,note:"Recovery"},
-  {month:"Sep",mult:1.0,note:"Stable"},
-  {month:"Okt",mult:1.1,note:"Q4 Start"},
-  {month:"Nov",mult:1.3,note:"Pre-Harbolnas"},
-  {month:"Des",mult:1.8,note:"Harbolnas"},
+const SEASONS = [
+  { label: "Jan", mult: 1.0 }, { label: "Feb", mult: 0.9 },
+  { label: "Mar", mult: 3.5 }, // Ramadan
+  { label: "Apr", mult: 0.6 }, // Post-Lebaran
+  { label: "May", mult: 1.0 }, { label: "Jun", mult: 1.1 },
+  { label: "Jul", mult: 1.0 }, { label: "Aug", mult: 1.0 },
+  { label: "Sep", mult: 1.0 }, { label: "Oct", mult: 1.0 },
+  { label: "Nov", mult: 1.2 }, // Pre-Harbolnas
+  { label: "Dec", mult: 1.8 }, // Harbolnas
 ];
 
-const SKU_CATS = ["Best Seller","Fast Moving","Potential","Slow Moving"];
-const BUFFERS = {"Best Seller":0.25,"Fast Moving":0.10,"Potential":0.05,"Slow Moving":0.05};
-const BCG_COLORS = {"⭐ STAR":C.gold,"🐄 CASH COW":C.green,"❓ QUESTION MARK":C.goldDim,"🐕 DOG":C.mid,"🐌 SLOW MOVE":C.orange,"☠ DEADSTOCK":C.red};
+const MONTHS_ALL = ["Jan","Feb","Mar","Apr","May","Jun","Jul","Aug","Sep","Oct","Nov","Dec"];
+const quarterOf = (mi) => Math.floor(mi / 3); // 0-based quarter index
 
-// ─── MODULE 1: CANVAS ────────────────────────────────────────────────────────
-function CanvasModule() {
-  const [d, setD] = useLocalState("canvas", {brandName:"",tagline:"",category:"",founded:"",keyPartners:"",keyActivities:"",keyResources:"",valueProposition:"",custRelationship:"",channels:"",custSegments:"",costStructure:"",revenueStreams:"",unfairAdvantage:"",problemSolving:"",keyMetrics:""});
-  const s = k => v => setD(p=>({...p,[k]:v}));
-  const blocks = [
-    {key:"keyPartners",label:"Key Partners",color:"#6b5a9e",cs:0,ce:1,rs:0,re:1,hint:"Supplier, mitra distribusi, vendor kritis"},
-    {key:"keyActivities",label:"Key Activities",color:"#4a7a9e",cs:1,ce:2,rs:0,re:0,hint:"Aktivitas inti yang menggerakkan bisnis"},
-    {key:"keyResources",label:"Key Resources",color:"#4a7a9e",cs:1,ce:2,rs:1,re:1,hint:"Tim, IP, modal, infrastruktur"},
-    {key:"valueProposition",label:"Value Proposition",color:C.gold,cs:2,ce:3,rs:0,re:1,hint:"Alasan utama pelanggan memilih brand ini"},
-    {key:"custRelationship",label:"Customer Relationships",color:"#4a9e6b",cs:3,ce:4,rs:0,re:0,hint:"Cara brand membangun & retain pelanggan"},
-    {key:"channels",label:"Channels",color:"#4a9e6b",cs:3,ce:4,rs:1,re:1,hint:"TikTok Shop, Shopee, offline, dll"},
-    {key:"custSegments",label:"Customer Segments",color:"#9e6b4a",cs:4,ce:5,rs:0,re:1,hint:"Siapa pelanggan & segmen prioritas"},
-  ];
-  const bottomBlocks = [
-    {key:"costStructure",label:"Cost Structure",color:C.red,hint:"COGS, SDM, ads, operasional, sewa"},
-    {key:"revenueStreams",label:"Revenue Streams",color:C.green,hint:"Dari mana pendapatan masuk"},
-  ];
-  const extraBlocks = [
-    {key:"unfairAdvantage",label:"Unfair Advantage",color:C.goldDim,hint:"Yang tidak bisa ditiru kompetitor"},
-    {key:"problemSolving",label:"Problem Solving",color:C.blue,hint:"Masalah apa yang diselesaikan brand"},
-    {key:"keyMetrics",label:"Key Metrics",color:"#9e9e4a",hint:"Metrik utama yang dimonitor tim"},
-  ];
+// --- SHARED STYLES - Professional Terminal ----------------------------------
+const FONT_MONO = "'IBM Plex Mono', 'Fira Code', 'Cascadia Code', monospace";
+const FONT_SANS = "'IBM Plex Sans', 'Inter', system-ui, sans-serif";
+
+const styles = {
+  app: {
+    minHeight: "100vh",
+    background: C.bg,
+    fontFamily: FONT_SANS,
+    color: C.text,
+    fontSize: 13,
+    lineHeight: 1.5,
+  },
+  header: {
+    background: "#1a1917",
+    borderBottom: `1px solid ${C.border}`,
+    padding: "0 32px",
+    display: "flex",
+    alignItems: "center",
+    gap: 24,
+    position: "sticky",
+    top: 0,
+    zIndex: 100,
+    height: 52,
+  },
+  headerLogo: {
+    display: "flex",
+    alignItems: "baseline",
+    gap: 10,
+  },
+  headerTitle: {
+    color: C.text,
+    fontSize: 13,
+    fontWeight: 600,
+    letterSpacing: "0.18em",
+    fontFamily: FONT_MONO,
+    textTransform: "uppercase",
+  },
+  headerVersion: {
+    color: C.accent,
+    fontSize: 10,
+    fontFamily: FONT_MONO,
+    letterSpacing: "0.12em",
+    padding: "2px 6px",
+    border: `1px solid ${C.accentDim}`,
+    borderRadius: 2,
+  },
+  headerSub: {
+    color: C.textMuted,
+    fontSize: 10,
+    fontFamily: FONT_MONO,
+    letterSpacing: "0.14em",
+    marginLeft: "auto",
+  },
+  nav: {
+    background: C.surface,
+    borderBottom: `1px solid ${C.border}`,
+    padding: "0 32px",
+    display: "flex",
+    gap: 0,
+    overflowX: "auto",
+    position: "sticky",
+    top: 52,
+    zIndex: 99,
+  },
+  navItem: (active) => ({
+    padding: "13px 18px",
+    fontSize: 11,
+    fontFamily: FONT_MONO,
+    fontWeight: active ? 600 : 400,
+    cursor: "pointer",
+    borderBottom: active ? `1px solid ${C.accent}` : "1px solid transparent",
+    borderTop: "1px solid transparent",
+    color: active ? C.text : C.textSecondary,
+    whiteSpace: "nowrap",
+    letterSpacing: "0.06em",
+    textTransform: "uppercase",
+    transition: "color 0.12s",
+  }),
+  content: { padding: "28px 32px", maxWidth: 1160, margin: "0 auto" },
+  card: {
+    background: C.surface,
+    border: `1px solid ${C.border}`,
+    borderRadius: 3,
+    padding: "20px 24px",
+    marginBottom: 16,
+  },
+  cardTitle: {
+    fontSize: 10,
+    fontFamily: FONT_MONO,
+    letterSpacing: "0.18em",
+    color: C.textSecondary,
+    textTransform: "uppercase",
+    marginBottom: 16,
+    fontWeight: 600,
+    borderBottom: `1px solid ${C.border}`,
+    paddingBottom: 10,
+  },
+  label: {
+    fontSize: 10,
+    color: C.textMuted,
+    fontFamily: FONT_MONO,
+    letterSpacing: "0.1em",
+    textTransform: "uppercase",
+    marginBottom: 5,
+    display: "block",
+  },
+  input: {
+    width: "100%",
+    padding: "7px 10px",
+    border: `1px solid ${C.border}`,
+    borderRadius: 2,
+    fontSize: 12,
+    background: C.surfaceAlt,
+    color: C.text,
+    fontFamily: FONT_MONO,
+    outline: "none",
+    boxSizing: "border-box",
+    transition: "border-color 0.12s",
+  },
+  btn: {
+    padding: "8px 16px",
+    background: C.accent,
+    color: "#ffffff",
+    border: "none",
+    borderRadius: 2,
+    fontSize: 10,
+    fontFamily: FONT_MONO,
+    cursor: "pointer",
+    letterSpacing: "0.14em",
+    fontWeight: 600,
+    textTransform: "uppercase",
+    transition: "all 0.12s",
+  },
+  btnSm: {
+    padding: "4px 10px",
+    background: C.surfaceAlt,
+    color: C.textSecondary,
+    border: `1px solid ${C.border}`,
+    borderRadius: 2,
+    fontSize: 10,
+    fontFamily: FONT_MONO,
+    cursor: "pointer",
+    letterSpacing: "0.1em",
+    textTransform: "uppercase",
+  },
+  btnDanger: {
+    padding: "4px 10px",
+    background: "transparent",
+    color: C.negative,
+    border: `1px solid ${C.negativeDim}`,
+    borderRadius: 2,
+    fontSize: 10,
+    fontFamily: FONT_MONO,
+    cursor: "pointer",
+    letterSpacing: "0.1em",
+  },
+  table: { width: "100%", borderCollapse: "collapse", fontSize: 12 },
+  th: {
+    background: C.surfaceAlt,
+    padding: "8px 12px",
+    textAlign: "left",
+    fontFamily: FONT_MONO,
+    fontSize: 10,
+    color: C.textMuted,
+    borderBottom: `1px solid ${C.border}`,
+    whiteSpace: "nowrap",
+    letterSpacing: "0.1em",
+    textTransform: "uppercase",
+    fontWeight: 500,
+  },
+  td: {
+    padding: "9px 12px",
+    borderBottom: `1px solid ${C.border}`,
+    fontFamily: FONT_MONO,
+    fontSize: 12,
+    color: C.text,
+  },
+  alert: (type) => ({
+    padding: "10px 14px",
+    borderRadius: 2,
+    marginBottom: 10,
+    fontSize: 11,
+    fontFamily: FONT_MONO,
+    letterSpacing: "0.04em",
+    lineHeight: 1.6,
+    borderLeft: `3px solid`,
+    borderTop: "none",
+    borderRight: "none",
+    borderBottom: "none",
+    borderLeftColor: type === "red" || type === "negative" ? C.negative
+      : type === "yellow" || type === "warning" ? C.warning
+      : type === "gold" || type === "accent" ? C.accent
+      : C.positive,
+    background: type === "red" || type === "negative" ? C.negativeLight
+      : type === "yellow" || type === "warning" ? C.warningLight
+      : type === "gold" || type === "accent" ? C.accentLight
+      : C.positiveLight,
+    color: type === "red" || type === "negative" ? "#c97a7a"
+      : type === "yellow" || type === "warning" ? "#c9a060"
+      : type === "gold" || type === "accent" ? "#7090d0"
+      : "#6aaa86",
+  }),
+  grid2: { display: "grid", gridTemplateColumns: "1fr 1fr", gap: 14 },
+  grid3: { display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 14 },
+  kpiBox: {
+    background: C.surface,
+    border: `1px solid ${C.border}`,
+    borderRadius: 3,
+    padding: "16px 18px",
+  },
+  kpiLabel: {
+    fontSize: 10,
+    color: C.textMuted,
+    fontFamily: FONT_MONO,
+    marginBottom: 6,
+    letterSpacing: "0.14em",
+    textTransform: "uppercase",
+  },
+  kpiValue: {
+    fontSize: 22,
+    fontWeight: 600,
+    color: C.text,
+    fontFamily: FONT_SANS,
+    letterSpacing: "-0.02em",
+  },
+  kpiSub: {
+    fontSize: 10,
+    color: C.textMuted,
+    fontFamily: FONT_MONO,
+    marginTop: 4,
+    letterSpacing: "0.08em",
+  },
+};
+
+// --- PASSWORD GATE ----------------------------------------------------------
+const APP_PASSWORD = (typeof process !== "undefined" && process.env?.REACT_APP_PASSWORD) || "brandos2024";
+
+function PasswordGate({ onUnlock }) {
+  const [pw, setPw] = useState("");
+  const [err, setErr] = useState(false);
   return (
-    <div>
-      <div style={{display:"grid",gridTemplateColumns:"repeat(4,1fr)",gap:10,marginBottom:20}}>
-        {[["Nama Brand","brandName"],["Tagline","tagline"],["Kategori","category"],["Tahun Berdiri","founded"]].map(([l,k])=>(
-          <Field key={k} label={l}><Input value={d[k]} onChange={s(k)} placeholder={l}/></Field>
-        ))}
-      </div>
-      <Divider label="Business Model Canvas"/>
-      <div style={{display:"grid",gridTemplateColumns:"repeat(5,1fr)",gridTemplateRows:"auto auto",gap:8,marginBottom:8}}>
-        {blocks.map(b=>(
-          <div key={b.key} style={{gridColumn:`${b.cs+1}/${b.ce+2}`,gridRow:`${b.rs+1}/${b.re+2}`,background:C.s1,border:`1px solid ${C.border2}`,borderTop:`2px solid ${b.color}`,borderRadius:2,padding:10,minHeight:b.rs!==b.re?160:100,display:"flex",flexDirection:"column"}}>
-            <div style={{fontSize:9,letterSpacing:"0.14em",textTransform:"uppercase",color:b.color,fontFamily:"'DM Mono',monospace",marginBottom:5}}>{b.label}</div>
-            <textarea value={d[b.key]} onChange={e=>s(b.key)(e.target.value)} placeholder={b.hint} style={{flex:1,background:"transparent",border:"none",outline:"none",color:C.text,fontFamily:"'DM Mono',monospace",fontSize:11,lineHeight:1.6,resize:"none",width:"100%",minHeight:60}}/>
-          </div>
-        ))}
-      </div>
-      <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:8,marginBottom:8}}>
-        {bottomBlocks.map(b=>(
-          <div key={b.key} style={{background:C.s1,border:`1px solid ${C.border2}`,borderTop:`2px solid ${b.color}`,borderRadius:2,padding:10}}>
-            <div style={{fontSize:9,letterSpacing:"0.14em",textTransform:"uppercase",color:b.color,fontFamily:"'DM Mono',monospace",marginBottom:5}}>{b.label}</div>
-            <textarea value={d[b.key]} onChange={e=>s(b.key)(e.target.value)} placeholder={b.hint} style={{width:"100%",background:"transparent",border:"none",outline:"none",color:C.text,fontFamily:"'DM Mono',monospace",fontSize:11,lineHeight:1.6,resize:"none",minHeight:60}}/>
-          </div>
-        ))}
-      </div>
-      <div style={{display:"grid",gridTemplateColumns:"repeat(3,1fr)",gap:8}}>
-        {extraBlocks.map(b=>(
-          <div key={b.key} style={{background:C.s1,border:`1px solid ${C.border2}`,borderTop:`2px solid ${b.color}`,borderRadius:2,padding:10}}>
-            <div style={{fontSize:9,letterSpacing:"0.14em",textTransform:"uppercase",color:b.color,fontFamily:"'DM Mono',monospace",marginBottom:5}}>{b.label}</div>
-            <textarea value={d[b.key]} onChange={e=>s(b.key)(e.target.value)} placeholder={b.hint} style={{width:"100%",background:"transparent",border:"none",outline:"none",color:C.text,fontFamily:"'DM Mono',monospace",fontSize:11,lineHeight:1.6,resize:"none",minHeight:70}}/>
-          </div>
-        ))}
+    <div style={{ minHeight: "100vh", background: "#1a1917", display: "flex", alignItems: "center", justifyContent: "center" }}>
+      <div style={{ background: "#ffffff", border: "1px solid #e4e2dc", borderRadius: 3, padding: 48, width: 360, textAlign: "center" }}>
+        <div style={{ color: C.text, fontSize: 18, fontWeight: 600, fontFamily: FONT_MONO, letterSpacing: "0.2em", textTransform: "uppercase", marginBottom: 4 }}>Brand OS</div>
+        <div style={{ color: C.accent, fontSize: 10, fontFamily: FONT_MONO, letterSpacing: "0.14em", marginBottom: 8 }}>v2.0</div>
+        <div style={{ color: C.textMuted, fontSize: 10, fontFamily: FONT_MONO, letterSpacing: "0.12em", marginBottom: 32, textTransform: "uppercase" }}>Bill & Board Group</div>
+        <input
+          type="password"
+          placeholder="Enter password"
+          value={pw}
+          onChange={(e) => { setPw(e.target.value); setErr(false); }}
+          onKeyDown={(e) => { if (e.key === "Enter") { if (pw === APP_PASSWORD) onUnlock(); else setErr(true); } }}
+          style={{ ...styles.input, marginBottom: 12, textAlign: "center", letterSpacing: "0.2em" }}
+        />
+        {err && <div style={{ color: "#c97a7a", fontSize: 10, fontFamily: FONT_MONO, letterSpacing: "0.1em", marginBottom: 8 }}>Access denied.</div>}
+        <button style={{ ...styles.btn, width: "100%", letterSpacing: "0.2em", padding: "10px 18px" }} onClick={() => { if (pw === APP_PASSWORD) onUnlock(); else setErr(true); }}>
+          AUTHENTICATE
+        </button>
       </div>
     </div>
   );
 }
 
-// ─── MODULE 2: FORECAST + SEASONALITY ────────────────────────────────────────
-function ForecastModule() {
-  const [seasons, setSeasons] = useLocalState("forecast_seasons", DEFAULT_SEASONS);
-  const [selectedMonth, setSelectedMonth] = useLocalState("forecast_month", 3);
-  const [bsBuffer, setBsBuffer] = useLocalState("forecast_bs", "25"); const [fmBuffer, setFmBuffer] = useLocalState("forecast_fm", "10");
-  const [trafficBuffer, setTrafficBuffer] = useLocalState("forecast_traffic", "5"); const [safetyBuffer, setSafetyBuffer] = useLocalState("forecast_safety", "15");
-  const emptySku = () => ({name:"",cat:"Best Seller",m1:"",m2:"",m3:"",price:"",cogs:"",stock:"",lead:"14"});
-  const [skus, setSkus] = useLocalState("forecast_skus", Array(8).fill(null).map(emptySku));
-  const [result, setResult] = useState(null);
+// --- TABS -------------------------------------------------------------------
+const TABS = [
+  "Canvas", "Business Plan", "Demand Forecast",
+  "Size Breakdown", "BCG Matrix", "Ad Performance",
+  "Product Tracker", "Unit Economics", "Cashflow", "Dashboard"
+];
 
-  const updSku = (i,k,v) => setSkus(s=>s.map((r,idx)=>idx===i?{...r,[k]:v}:r));
-  const updSeason = (i,k,v) => setSeasons(s=>s.map((r,idx)=>idx===i?{...r,[k]:v}:r));
+// --- CATEGORY CONFIG --------------------------------------------------------
+const SKU_CATEGORIES = [
+  { value: "best_seller",  label: "Best Seller",  buffer: 25, color: C.accent,
+    advice: "Jaga flow penjualan - restock konsisten, jangan sampai stockout. Agresif di iklan boleh tapi selalu monitor ROAS dan kondisi stok secara berkala. Jangan over-rely pada satu SKU." },
+  { value: "potential",    label: "Potential",    buffer: 12, color: C.positive,
+    advice: "Tambah buffer jika ada validasi kuat bahwa penjualan akan naik signifikan (misal: masuk trending, atau setelah kampanye iklan berjalan 7+ hari dengan ROAS positif). Jangan overstock sebelum ada bukti data." },
+  { value: "slow_moving",  label: "Slow Moving",  buffer: 5,  color: C.warning,
+    advice: "Hati-hati jadi deadstock. Evaluasi dulu apakah masih ada potensi naik (harga terlalu tinggi? foto kurang menarik? musim salah?). Jika bisa diperbaiki, hold restock. Jika tidak ada sinyal naik dalam 30 hari, siapkan exit strategy." },
+  { value: "deadstock",    label: "Deadstock",    buffer: 0,  color: C.negative,
+    advice: "Hentikan restock. Fokus habiskan stok existing secepatnya - flash sale, bundling, atau diskon agresif. Setiap hari yang lewat = biaya opportunity cost modal yang tertahan." },
+];
+const getCategoryConfig = (val) => SKU_CATEGORIES.find(c => c.value === val) || SKU_CATEGORIES[0];
 
-  const calculate = () => {
-    const sm = seasons[selectedMonth].mult;
-    const rows = skus.map(sk => {
-      const sales = [f(sk.m1)||0, f(sk.m2)||0, f(sk.m3)||0];
-      const valid = sales.filter(v=>v>0);
-      const avg = valid.length ? valid.reduce((a,b)=>a+b,0)/valid.length : 0;
-      const buf = sk.cat==="Best Seller"?f(bsBuffer)/100:sk.cat==="Fast Moving"?f(fmBuffer)/100:f(trafficBuffer)/100;
-      const forecast = Math.ceil(avg * sm * (1+buf));
-      const stockNeeded = Math.ceil(forecast * (1+f(safetyBuffer)/100));
-      const restock = Math.max(0, stockNeeded - (f(sk.stock)||0));
-      const revenue = forecast * (f(sk.price)||0);
-      const restockCost = restock * (f(sk.cogs)||0);
-      const dailyAvg = avg/30;
-      const dio = dailyAvg > 0 ? (f(sk.stock)||0)/dailyAvg : 0;
-      const ssr = avg > 0 ? (f(sk.stock)||0)/avg : 0;
-      return {...sk, avg, sm, buf, forecast, stockNeeded, restock, revenue, restockCost, dio, ssr};
-    });
-    setResult(rows);
-  };
+// ===========================================================================
+// --- FORECAST MODULE (ENHANCED v2) -----------------------------------------
+// ===========================================================================
+function ForecastModule({ skuNames, setSkuNames }) {
+  const defaultSkus = () =>
+    Array(3).fill(null).map((_, i) => ({
+      name: `SKU ${i + 1}`,
+      category: "best_seller",
+      hist: [50, 55, 60],
+      avgSales: 55,
+      histOverride: false,
+      currentStock: 100,
+      incomingStock: 0,        // WIP / incoming production units
+      incomingDate: "",        // expected arrival date yyyy-mm-dd
+      price: 150000,
+      cogs: 70000,
+      leadDays: 14,
+      minOrder: 50,
+    }));
 
-  const totalForecastRev = result ? result.reduce((a,r)=>a+r.revenue,0) : 0;
-  const totalRestock = result ? result.reduce((a,r)=>a+r.restockCost,0) : 0;
-
-  return (
-    <div>
-      <Divider label="Seasonality Multiplier"/>
-      <div style={{display:"grid",gridTemplateColumns:"repeat(12,1fr)",gap:4,marginBottom:16}}>
-        {seasons.map((s,i)=>(
-          <div key={i} onClick={()=>setSelectedMonth(i)} style={{background:i===selectedMonth?C.goldDim+"40":C.s1,border:`1px solid ${i===selectedMonth?C.gold:C.border2}`,borderRadius:2,padding:"8px 4px",cursor:"pointer",textAlign:"center"}}>
-            <div style={{fontSize:9,color:i===selectedMonth?C.gold:C.mid,fontFamily:"'DM Mono',monospace",marginBottom:4}}>{s.month}</div>
-            <input type="number" value={s.mult} onChange={e=>updSeason(i,"mult",parseFloat(e.target.value)||1)}
-              style={{width:"100%",background:"transparent",border:"none",outline:"none",color:i===selectedMonth?C.goldBrt:C.text,fontFamily:"'DM Mono',monospace",fontSize:12,textAlign:"center",fontWeight:700}}/>
-            <div style={{fontSize:8,color:C.dim,fontFamily:"'DM Mono',monospace",marginTop:2,lineHeight:1.2}}>{s.note}</div>
-          </div>
-        ))}
-      </div>
-      <div style={{padding:"10px 14px",background:C.goldDim+"15",border:`1px solid ${C.gold}30`,borderRadius:2,marginBottom:16,fontSize:11,fontFamily:"'DM Mono',monospace",color:C.mid}}>
-        Forecast bulan: <span style={{color:C.goldBrt,fontWeight:700}}>{seasons[selectedMonth].month}</span> — Seasonal multiplier: <span style={{color:C.goldBrt,fontWeight:700}}>{seasons[selectedMonth].mult}x</span> <span style={{color:C.dim}}>({seasons[selectedMonth].note})</span>
-      </div>
-
-      <div style={{display:"grid",gridTemplateColumns:"repeat(4,1fr)",gap:10,marginBottom:16}}>
-        <Field label="Best Seller Buffer"><Input value={bsBuffer} onChange={setBsBuffer} suffix="%" type="number"/></Field>
-        <Field label="Fast Moving Buffer"><Input value={fmBuffer} onChange={setFmBuffer} suffix="%" type="number"/></Field>
-        <Field label="Traffic Growth %"><Input value={trafficBuffer} onChange={setTrafficBuffer} suffix="%" type="number"/></Field>
-        <Field label="Safety Stock %"><Input value={safetyBuffer} onChange={setSafetyBuffer} suffix="%" type="number"/></Field>
-      </div>
-
-      <Divider label="SKU Input"/>
-      <div style={{overflowX:"auto",marginBottom:12}}>
-        <table style={{width:"100%",borderCollapse:"collapse",fontSize:11,fontFamily:"'DM Mono',monospace"}}>
-          <thead>
-            <tr style={{borderBottom:`1px solid ${C.border}`}}>
-              {["SKU / Produk","Kategori","M-3","M-2","M-1","Harga Jual","COGS/unit","Stok Skrg","Lead (hr)",""].map(h=>(
-                <th key={h} style={{padding:"7px 8px",textAlign:"left",color:C.dim,fontSize:9,letterSpacing:"0.1em",textTransform:"uppercase",fontWeight:"normal"}}>{h}</th>
-              ))}
-            </tr>
-          </thead>
-          <tbody>
-            {skus.map((sk,i)=>(
-              <tr key={i} style={{borderBottom:`1px solid ${C.border}20`}}>
-                <td style={{padding:"5px 6px"}}><input value={sk.name} onChange={e=>updSku(i,"name",e.target.value)} placeholder={`SKU ${i+1}`} style={{background:"transparent",border:"none",outline:"none",color:C.text,fontFamily:"'DM Mono',monospace",fontSize:11,width:110}}/></td>
-                <td style={{padding:"5px 6px"}}>
-                  <select value={sk.cat} onChange={e=>updSku(i,"cat",e.target.value)} style={{background:C.s1,border:`1px solid ${C.border2}`,color:C.text,fontFamily:"'DM Mono',monospace",fontSize:10,padding:"3px 5px",borderRadius:2,outline:"none"}}>
-                    {SKU_CATS.map(c=><option key={c}>{c}</option>)}
-                  </select>
-                </td>
-                {["m1","m2","m3","price","cogs","stock","lead"].map(k=>(
-                  <td key={k} style={{padding:"5px 6px"}}><input type="number" value={sk[k]} onChange={e=>updSku(i,k,e.target.value)} placeholder="0" style={{background:"transparent",border:"none",outline:"none",color:C.text,fontFamily:"'DM Mono',monospace",fontSize:11,width:70,textAlign:"right"}}/></td>
-                ))}
-                <td><button onClick={()=>setSkus(s=>s.filter((_,idx)=>idx!==i))} style={{background:"none",border:"none",color:C.dim,cursor:"pointer",fontSize:14}}>×</button></td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
-      </div>
-      <div style={{display:"flex",gap:8,marginBottom:20}}>
-        <Btn secondary onClick={()=>{const newName=`SKU ${skus.length+1}`;setAdData(d=>({...d,[newName]:emptySku()}));}}>+ SKU</Btn>
-        <Btn onClick={calculate}>Hitung Forecast →</Btn>
-      </div>
-
-      {result && (
-        <>
-          <div style={{display:"grid",gridTemplateColumns:"repeat(3,1fr)",gap:10,marginBottom:20}}>
-            <Stat label="Total Forecast Revenue" value={IDR(totalForecastRev)} hi/>
-            <Stat label="Total Restock Cost" value={IDR(totalRestock)} color={C.orange}/>
-            <Stat label="Seasonal Multiplier" value={`${seasons[selectedMonth].mult}x`} sub={seasons[selectedMonth].note} color={C.gold}/>
-          </div>
-          <div style={{overflowX:"auto"}}>
-            <table style={{width:"100%",borderCollapse:"collapse",fontSize:11,fontFamily:"'DM Mono',monospace"}}>
-              <thead>
-                <tr style={{borderBottom:`1px solid ${C.border}`}}>
-                  {["SKU","Kategori","Avg/Bln","Seasonal","Buffer","Forecast","Stok Needed","Restock","Rev Forecast","DIO","SSR"].map(h=>(
-                    <th key={h} style={{padding:"7px 8px",textAlign:"left",color:C.dim,fontSize:9,letterSpacing:"0.1em",textTransform:"uppercase",fontWeight:"normal"}}>{h}</th>
-                  ))}
-                </tr>
-              </thead>
-              <tbody>
-                {result.filter(r=>r.name||r.avg>0).map((r,i)=>{
-                  const catCol = r.cat==="Best Seller"?C.gold:r.cat==="Fast Moving"?C.green:r.cat==="Potential"?C.blue:C.dim;
-                  const dioSt = r.dio<15?"bad":r.dio<30?"warn":"ok";
-                  const ssrSt = r.ssr<1?"bad":r.ssr<2?"warn":"ok";
-                  const stColors = {ok:C.green,warn:C.orange,bad:C.red};
-                  return (
-                    <tr key={i} style={{borderBottom:`1px solid ${C.border}20`,background:i%2===0?C.s1:C.s2}}>
-                      <td style={{padding:"7px 8px",color:C.text}}>{r.name||`SKU ${i+1}`}</td>
-                      <td style={{padding:"7px 8px"}}><Tag c={catCol}>{r.cat}</Tag></td>
-                      <td style={{padding:"7px 8px",color:C.mid,textAlign:"right"}}>{r.avg.toFixed(1)}</td>
-                      <td style={{padding:"7px 8px",color:C.gold,textAlign:"right"}}>{r.sm}x</td>
-                      <td style={{padding:"7px 8px",color:catCol,textAlign:"right"}}>+{(r.buf*100).toFixed(0)}%</td>
-                      <td style={{padding:"7px 8px",color:C.text,fontWeight:700,textAlign:"right"}}>{NUM(r.forecast)}</td>
-                      <td style={{padding:"7px 8px",color:C.mid,textAlign:"right"}}>{NUM(r.stockNeeded)}</td>
-                      <td style={{padding:"7px 8px",color:r.restock>0?C.orange:C.green,textAlign:"right"}}>{r.restock>0?NUM(r.restock):"✓"}</td>
-                      <td style={{padding:"7px 8px",color:C.gold,textAlign:"right"}}>{IDR(r.revenue)}</td>
-                      <td style={{padding:"7px 8px",color:stColors[dioSt],textAlign:"right"}}>{r.dio.toFixed(0)}hr</td>
-                      <td style={{padding:"7px 8px",color:stColors[ssrSt],textAlign:"right"}}>{r.ssr.toFixed(2)}x</td>
-                    </tr>
-                  );
-                })}
-              </tbody>
-            </table>
-          </div>
-        </>
-      )}
-    </div>
-  );
-}
-
-// ─── MODULE 3: SIZE BREAKDOWN ─────────────────────────────────────────────────
-function SizeModule() {
-  const sizes = ["XXS","XS","S","M","L","XL","XXL","XXXL"];
-  const [ratios, setRatios] = useLocalState("size_ratios", {XXS:0,XS:0,S:20,M:35,L:25,XL:15,XXL:5,XXXL:0});
-  const [cogsMap, setCogsMap] = useLocalState("size_cogs", {});
-  const updRatio = (sz,v) => setRatios(r=>({...r,[sz]:parseFloat(v)||0}));
-  const updCogs = (name,v) => setCogsMap(m=>({...m,[name]:v}));
-  const totalRatio = Object.values(ratios).reduce((a,b)=>a+b,0);
-
-  // Auto-pull from Forecast localStorage
-  const getForecastSkus = () => {
-    try {
-      const stored = localStorage.getItem("brandos_forecast_skus");
-      const forecastSkus = stored ? JSON.parse(stored) : [];
-      const seasons = (() => { try { return JSON.parse(localStorage.getItem("brandos_forecast_seasons")||"[]"); } catch { return []; } })();
-      const month = (() => { try { return JSON.parse(localStorage.getItem("brandos_forecast_month")||"3"); } catch { return 3; } })();
-      const sm = seasons[month]?.mult || 1;
-      const bs = (() => { try { return parseFloat(JSON.parse(localStorage.getItem("brandos_forecast_bs")||"25"))/100; } catch { return 0.25; } })();
-      const fm = (() => { try { return parseFloat(JSON.parse(localStorage.getItem("brandos_forecast_fm")||"10"))/100; } catch { return 0.10; } })();
-      const tr = (() => { try { return parseFloat(JSON.parse(localStorage.getItem("brandos_forecast_traffic")||"5"))/100; } catch { return 0.05; } })();
-      const ss = (() => { try { return parseFloat(JSON.parse(localStorage.getItem("brandos_forecast_safety")||"15"))/100; } catch { return 0.15; } })();
-      return forecastSkus.filter(sk=>sk.name).map(sk => {
-        const sales = [parseFloat(sk.m1)||0, parseFloat(sk.m2)||0, parseFloat(sk.m3)||0].filter(v=>v>0);
-        const avg = sales.length ? sales.reduce((a,b)=>a+b,0)/sales.length : 0;
-        const buf = sk.cat==="Best Seller"?bs:sk.cat==="Fast Moving"?fm:tr;
-        const forecast = Math.ceil(avg * sm * (1+buf));
-        return {name: sk.name, forecast, cogsPerUnit: cogsMap[sk.name]||""};
-      });
-    } catch { return []; }
-  };
-  const skus = getForecastSkus();
-
-  const breakdown = skus.map(sk => {
-    const fc = f(sk.forecast)||0;
-    const bySize = {};
-    sizes.forEach(sz => { bySize[sz] = Math.ceil(fc * ratios[sz]/100); });
-    const cogsTotal = Object.values(bySize).reduce((a,b)=>a+b,0) * (f(cogsMap[sk.name]||0));
-    return {...sk, bySize, cogsTotal, total:Object.values(bySize).reduce((a,b)=>a+b,0)};
+  const [skus, setSkus] = useState(() => {
+    try { return JSON.parse(localStorage.getItem("forecast_skus_v2")) || defaultSkus(); }
+    catch { return defaultSkus(); }
+  });
+  const [forecastMonth, setForecastMonth] = useState(() => {
+    try { return parseInt(localStorage.getItem("forecast_month") || new Date().getMonth()); }
+    catch { return new Date().getMonth(); }
+  });
+  const [safetyPct, setSafetyPct] = useState(15);
+  const [forecastMonths, setForecastMonths] = useState(3);
+  const [expandedSku, setExpandedSku] = useState(null); // which SKU has history expanded
+  const [brandGender, setBrandGender] = useState(() => {
+    try { return localStorage.getItem("forecast_gender") || "menswear"; } catch { return "menswear"; }
+  });
+  const [sizeRange, setSizeRange] = useState(() => {
+    try { return localStorage.getItem("forecast_size_range") || "xs_xl"; } catch { return "xs_xl"; }
   });
 
+  // Persist
+  useEffect(() => {
+    localStorage.setItem("forecast_skus_v2", JSON.stringify(skus));
+    // Also write to "forecast_skus" key so AdPerformance module can read it
+    const compat = skus.map(s => ({
+      name: s.name, avgSales: computeAvg(s), currentStock: s.currentStock,
+      price: s.price, cogs: s.cogs, leadDays: s.leadDays, minOrder: s.minOrder,
+    }));
+    localStorage.setItem("forecast_skus", JSON.stringify(compat));
+    localStorage.setItem("forecast_month", forecastMonth);
+    setSkuNames(skus.map((s) => s.name));
+  }, [skus, forecastMonth, setSkuNames]);
+
+  useEffect(() => { localStorage.setItem("forecast_gender", brandGender); }, [brandGender]);
+  useEffect(() => { localStorage.setItem("forecast_size_range", sizeRange); }, [sizeRange]);
+
+  // Compute avg from history (or manual override)
+  const computeAvg = (sku) => {
+    if (sku.histOverride) return sku.avgSales;
+    const filled = (sku.hist || [0,0,0]).filter(v => v > 0);
+    return filled.length > 0 ? filled.reduce((a,b)=>a+b,0) / filled.length : sku.avgSales;
+  };
+
+  const updateSku = (i, field, val) => {
+    const copy = [...skus];
+    if (field === "hist") {
+      copy[i] = { ...copy[i], hist: val, histOverride: false };
+    } else if (field === "avgSales") {
+      copy[i] = { ...copy[i], avgSales: num(val), histOverride: true };
+    } else if (field === "name" || field === "category") {
+      copy[i] = { ...copy[i], [field]: val };
+    } else {
+      copy[i] = { ...copy[i], [field]: num(val) };
+    }
+    setSkus(copy);
+  };
+
+  const addSku = () => setSkus([...skus, {
+    name: `SKU ${skus.length + 1}`, category: "potential",
+    hist: [0, 0, 0], avgSales: 50, histOverride: false,
+    currentStock: 100, incomingStock: 0, incomingDate: "",
+    price: 150000, cogs: 70000, leadDays: 14, minOrder: 50,
+  }]);
+  const removeSku = (i) => setSkus(skus.filter((_, idx) => idx !== i));
+
+  // -- Date helpers -----------------------------------------------
+  const today = new Date();
+  today.setHours(0,0,0,0);
+  const todayStr = today.toISOString().split("T")[0];
+  const daysInCurrentMonth = new Date(today.getFullYear(), today.getMonth()+1, 0).getDate();
+  const dayOfMonth = today.getDate();
+  const remainingDaysMonth = daysInCurrentMonth - dayOfMonth + 1; // incl. today
+
+  // Double-date days in current month (10th and matching day e.g. 6/6, 7/7...)
+  const currentMonthNum = today.getMonth() + 1; // 1-12
+  const doubleDateDay = currentMonthNum <= 12 ? currentMonthNum : null; // e.g. June = 6, so 6/6
+  const hasDoubleDate = doubleDateDay !== null && doubleDateDay >= dayOfMonth;
+  // Double-date multiplier per season
+  const isRamadan = forecastMonth === 2; // March
+  const isHarbolnas = forecastMonth === 11; // December
+  const ddMult = isRamadan ? 4.5 : isHarbolnas ? 4.0 : 2.5; // midpoint of ranges
+
+  // -- Per-SKU calcs ----------------------------------------------
+  const calcSku = (sku) => {
+    const catCfg = getCategoryConfig(sku.category);
+    const bufferPct = catCfg.buffer;
+    const avg = computeAvg(sku);
+    const seasonMult = SEASONS[forecastMonth].mult;
+    const adjustedSales = avg * seasonMult;
+    const dailySales = adjustedSales / 30;
+
+    // Incoming stock - only counts if arrival date is within this month or already passed
+    let effectiveIncoming = 0;
+    let incomingDaysUntil = null;
+    if (sku.incomingStock > 0 && sku.incomingDate) {
+      const arrDate = new Date(sku.incomingDate);
+      arrDate.setHours(0,0,0,0);
+      incomingDaysUntil = Math.round((arrDate - today) / 86400000);
+      const endOfMonth = new Date(today.getFullYear(), today.getMonth()+1, 0);
+      if (arrDate <= endOfMonth) effectiveIncoming = sku.incomingStock;
+    }
+
+    const totalEffectiveStock = sku.currentStock + effectiveIncoming;
+
+    // Closing forecast bulan berjalan
+    const salesRemainingMonth = dailySales * remainingDaysMonth;
+    // Add double-date spike if still upcoming this month
+    const ddSpike = hasDoubleDate ? dailySales * ddMult : 0;
+    const projectedSalesThisMonth = salesRemainingMonth + ddSpike;
+    const closingStockThisMonth = Math.max(0, totalEffectiveStock - projectedSalesThisMonth);
+
+    // Next month forecast
+    const nextMonthIdx = (forecastMonth + 1) % 12;
+    const nextMonthSales = avg * SEASONS[nextMonthIdx].mult;
+    const buffer = nextMonthSales * (bufferPct / 100);
+    const safetyStock = nextMonthSales * (safetyPct / 100);
+    const reorderPoint = (nextMonthSales / 30) * sku.leadDays + safetyStock;
+
+    // Restock - based on total effective stock (incl. incoming)
+    const restock = sku.category === "deadstock" ? 0
+      : Math.max(0, Math.ceil((nextMonthSales + buffer + safetyStock - totalEffectiveStock) / sku.minOrder) * sku.minOrder);
+    const restockCost = restock * sku.cogs;
+    const daysOfStock = dailySales > 0 ? totalEffectiveStock / dailySales : 999;
+    const excessStock = totalEffectiveStock - (adjustedSales + buffer + safetyStock);
+
+    // Trend
+    const hist = sku.hist || [0,0,0];
+    const trend = (hist[0]>0 && hist[2]>0) ? ((hist[2]-hist[0])/hist[0]*100) : 0;
+
+    let stockStatus = "ok";
+    if (sku.category === "deadstock") stockStatus = "deadstock_risk";
+    else if (totalEffectiveStock <= safetyStock) stockStatus = "critical";
+    else if (totalEffectiveStock < reorderPoint) stockStatus = "low";
+    else if (excessStock > adjustedSales * 2 || daysOfStock > 90) stockStatus = "overstock";
+
+    // Double-date warning
+    const ddWarning = hasDoubleDate && dailySales > 0 && sku.currentStock < ddSpike * 2;
+
+    return {
+      adjustedSales, avg, dailySales, buffer, bufferPct, safetyStock,
+      reorderPoint, restock, restockCost, daysOfStock, stockStatus,
+      excessStock, trend, effectiveIncoming, incomingDaysUntil,
+      totalEffectiveStock, closingStockThisMonth, projectedSalesThisMonth,
+      salesRemainingMonth, ddSpike, ddWarning,
+    };
+  };
+
+  // -- Revenue projection -----------------------------------------
+  const revenueProjection = () => [0,1,2].map((q) => {
+    const startMonth = (forecastMonth + q * 3) % 12;
+    let totalRev = 0, totalGP = 0;
+    for (let m = 0; m < 3; m++) {
+      const mi = (startMonth + m) % 12;
+      skus.forEach((sku) => {
+        const sales = computeAvg(sku) * SEASONS[mi].mult;
+        totalRev += sales * sku.price;
+        totalGP  += sales * (sku.price - sku.cogs);
+      });
+    }
+    const months = [0,1,2].map((m) => MONTHS_ALL[(startMonth + m) % 12]);
+    return { q: q+1, months, totalRev, totalGP, margin: totalRev ? totalGP/totalRev : 0 };
+  });
+
+  const projections = revenueProjection();
+  const skuCalcs = skus.map(calcSku);
+  const criticalSkus    = skuCalcs.filter(c => c.stockStatus === "critical");
+  const lowSkus         = skuCalcs.filter(c => c.stockStatus === "low");
+  const overstockSkus   = skuCalcs.filter(c => c.stockStatus === "overstock" || c.stockStatus === "deadstock_risk");
+  const totalRestockCost = skuCalcs.reduce((s,c) => s + c.restockCost, 0);
+
+  const statusLabel = { ok:"On Track", low:"Low Stock", critical:"Critical", overstock:"Overstock", deadstock_risk:"Deadstock" };
+  const statusColor = { ok:C.positive, low:C.warning, critical:C.negative, overstock:C.warning, deadstock_risk:C.negative };
+
+  const prevMonths = [
+    MONTHS_ALL[(forecastMonth - 3 + 12) % 12],
+    MONTHS_ALL[(forecastMonth - 2 + 12) % 12],
+    MONTHS_ALL[(forecastMonth - 1 + 12) % 12],
+  ];
+
+  const curMonthLabel = MONTHS_ALL[forecastMonth];
+  const nextMonthLabel = MONTHS_ALL[(forecastMonth + 1) % 12];
+
+  // -- Action Plan (pre-computed before return) ------------------
+  const actionPlans = (() => {
+    const ROAS_FLOOR = 3;
+    const plans = { marketing:[], production:[], finance:[] };
+    skus.forEach((sku, i) => {
+      const c = skuCalcs[i];
+      const cat = getCategoryConfig(sku.category);
+      const nm = sku.name;
+      if (c.stockStatus==="critical") {
+        plans.marketing.push({ t:"negative", msg:`${nm}: Tahan agresivitas iklan - stok kritis, risiko stockout merusak rating toko. Fokus organic: update foto, deskripsi, respon ulasan.` });
+      } else if (c.stockStatus==="overstock"||c.stockStatus==="deadstock_risk") {
+        plans.marketing.push({ t:"warning", msg:`${nm}: Aktifkan flash voucher & bundling. Target likuidasi ${Math.round(c.excessStock>0?c.excessStock:sku.currentStock*0.3)} unit dalam 14 hari. Turunkan floor ROAS ke ${(ROAS_FLOOR*0.8).toFixed(1)}x sementara.` });
+      } else if (c.stockStatus==="low") {
+        plans.marketing.push({ t:"warning", msg:`${nm}: Kurangi budget harian 30-40% sambil tunggu restock (${sku.leadDays} hari). Jangan pause total - jaga ranking produk.` });
+      } else if (cat.value==="best_seller") {
+        plans.marketing.push({ t:"positive", msg:`${nm}: Kondisi ideal. Naikkan budget iklan 20% per 3 hari jika ROAS stabil.` });
+      }
+      if (c.ddWarning) plans.marketing.push({ t:"warning", msg:`${nm}: Double date mendekat - siapkan flash voucher 24 jam, pastikan stok tidak habis di tengah event.` });
+      if (c.restock>0 && sku.category!=="deadstock") {
+        const isUrgent = c.stockStatus==="critical";
+        const deadline = (() => { const d=new Date(today); d.setDate(d.getDate()+Math.max(1,remainingDaysMonth-sku.leadDays)); return d.toLocaleDateString("id-ID"); })();
+        plans.production.push({ t:isUrgent?"negative":c.stockStatus==="low"?"warning":"accent", msg:`${isUrgent?"URGENT - ":""}${nm}: PO ${c.restock} unit (${fmt(c.restockCost)}). Lead time ${sku.leadDays} hari - order paling lambat ${deadline}.` });
+      }
+      if (sku.category==="deadstock") plans.production.push({ t:"negative", msg:`${nm}: Hentikan produksi. Habiskan stok existing ${sku.currentStock} unit terlebih dahulu.` });
+      if (c.effectiveIncoming>0) plans.production.push({ t:"accent", msg:`${nm}: ${c.effectiveIncoming} unit incoming${c.incomingDaysUntil!=null?" ("+c.incomingDaysUntil+" hr lagi)":""}. Siapkan QC dan kapasitas gudang.` });
+      if (c.restockCost>0 && sku.category!=="deadstock") plans.finance.push({ t:"accent", msg:`${nm}: Alokasikan ${fmt(c.restockCost)} untuk restock bulan ini.` });
+      if (c.stockStatus==="overstock"||c.stockStatus==="deadstock_risk") {
+        plans.finance.push({ t:"warning", msg:`${nm}: Nilai aset stok ${fmt(sku.currentStock*sku.cogs)} (at cost). Likuidasi di 70% harga = ${fmt(Math.round(sku.currentStock*sku.price*0.7))}. Jika tidak bergerak 21 hari, turunkan harga 30%.` });
+      }
+    });
+    if (totalRestockCost>0) plans.finance.push({ t:"accent", msg:`Total kebutuhan modal restock: ${fmt(totalRestockCost)}. Cek posisi kas di tab Cashflow sebelum konfirmasi PO.` });
+    return plans;
+  })();
+
   return (
     <div>
-      <Divider label="Size Ratio"/>
-      <div style={{display:"grid",gridTemplateColumns:"repeat(8,1fr)",gap:8,marginBottom:8}}>
-        {sizes.map(sz=>(
-          <Field key={sz} label={sz}>
-            <Input value={ratios[sz]} onChange={v=>updRatio(sz,v)} suffix="%" type="number"/>
-          </Field>
-        ))}
-      </div>
-      <div style={{padding:"8px 12px",background:Math.abs(totalRatio-100)<0.5?C.greenBg:C.redBg,border:`1px solid ${Math.abs(totalRatio-100)<0.5?C.green:C.red}40`,borderRadius:2,marginBottom:20,fontSize:11,fontFamily:"'DM Mono',monospace",color:Math.abs(totalRatio-100)<0.5?C.green:C.red}}>
-        Total ratio: {totalRatio.toFixed(1)}% {Math.abs(totalRatio-100)<0.5?"✓ OK":"← Harus = 100%"}
+      <div style={{ display:"flex", justifyContent:"space-between", alignItems:"flex-start", marginBottom:16 }}>
+        <div>
+          <h2 style={{ fontSize: 15, fontWeight: 600, marginBottom: 4, fontFamily: FONT_MONO, letterSpacing: "0.04em", color: C.text }}>Demand Forecast</h2>
+          <p style={{ fontSize: 11, color: C.textSecondary, fontFamily: FONT_MONO, marginBottom: 0, letterSpacing: "0.03em" }}>
+            Proyeksi stok, closing bulan berjalan, revenue 3 kuartal, dan saran strategis per SKU.
+          </p>
+        </div>
+        <div style={{ textAlign:"right", fontSize:10, fontFamily:FONT_MONO, color:C.textMuted }}>
+          <div style={{ color:C.textSecondary, fontWeight:600 }}>Last Updated</div>
+          <div style={{ color:C.text, fontSize:12, marginTop:2 }}>{todayStr}</div>
+          <div style={{ marginTop:2 }}>Hari ke-{dayOfMonth} / {daysInCurrentMonth} - sisa {remainingDaysMonth} hari</div>
+          {hasDoubleDate && <div style={{ color:C.warning, marginTop:2, fontWeight:600 }}>Double Date {currentMonthNum}/{currentMonthNum} dalam {doubleDateDay - dayOfMonth + 1} hari</div>}
+        </div>
       </div>
 
-      <Divider label="SKU Forecast Input"/>
-      {skus.length === 0 && (
-        <div style={{padding:"20px",background:C.s1,border:`1px solid ${C.border2}`,borderRadius:2,marginBottom:16,textAlign:"center",color:C.dim,fontFamily:"'DM Mono',monospace",fontSize:11}}>
-          Belum ada SKU — isi nama produk di tab <span style={{color:C.gold}}>03 Forecast</span> dulu
+      {/* Alerts */}
+      {criticalSkus.length > 0 && <div style={styles.alert("red")}>{criticalSkus.length} SKU Critical - stok di bawah safety stock. Segera buat PO.</div>}
+      {lowSkus.length > 0 && <div style={styles.alert("warning")}>{lowSkus.length} SKU Low Stock - mendekati reorder point. Siapkan PO sekarang.</div>}
+      {overstockSkus.length > 0 && <div style={styles.alert("warning")}>{overstockSkus.length} SKU Overstock - kas tertahan. Prioritas likuidasi.</div>}
+      {skuCalcs.some(c => c.ddWarning) && <div style={styles.alert("warning")}>Double date {currentMonthNum}/{currentMonthNum} mendekat - {skuCalcs.filter(c=>c.ddWarning).length} SKU berpotensi stockout saat spike. Cek stok segera.</div>}
+      {totalRestockCost > 0 && (
+        <div style={{ ...styles.alert("accent"), background: C.accentLight, borderLeftColor: C.accent, color: C.accent }}>
+          Total kebutuhan restock: <strong>{fmt(totalRestockCost)}</strong> - pastikan cashflow mencukupi sebelum PO.
         </div>
       )}
-      <div style={{display:"grid",gridTemplateColumns:"repeat(3,1fr)",gap:10,marginBottom:16}}>
-        {skus.map((sk,i)=>(
-          <div key={i} style={{background:C.s1,border:`1px solid ${C.border2}`,borderRadius:2,padding:12}}>
-            <div style={{fontSize:11,color:C.gold,fontFamily:"'DM Mono',monospace",fontWeight:700,marginBottom:8}}>{sk.name}</div>
-            <div style={{fontSize:10,color:C.mid,fontFamily:"'DM Mono',monospace",marginBottom:10}}>Forecast: <span style={{color:C.text,fontWeight:700}}>{Math.round(sk.forecast||0).toLocaleString("id-ID")} unit</span></div>
-            <Field label="COGS/unit"><Input value={cogsMap[sk.name]||""} onChange={v=>updCogs(sk.name,v)} prefix="Rp" type="number"/></Field>
+
+      {/* Settings */}
+      <div style={styles.card}>
+        <div style={styles.cardTitle}>Pengaturan Forecast</div>
+        <div style={{ display: "grid", gridTemplateColumns: "repeat(5, 1fr)", gap: 14 }}>
+          <div>
+            <label style={styles.label}>Bulan Forecast</label>
+            <select value={forecastMonth} onChange={(e) => setForecastMonth(+e.target.value)} style={styles.input}>
+              {MONTHS_ALL.map((m, i) => <option key={i} value={i}>{m} (×{SEASONS[i].mult})</option>)}
+            </select>
           </div>
-        ))}
+          <div>
+            <label style={styles.label}>Safety Stock %</label>
+            <input type="number" value={safetyPct} onChange={(e) => setSafetyPct(+e.target.value)} style={styles.input} min={0} max={50} />
+          </div>
+          <div>
+            <label style={styles.label}>Proyeksi Revenue</label>
+            <select value={forecastMonths} onChange={(e) => setForecastMonths(+e.target.value)} style={styles.input}>
+              <option value={3}>1 Kuartal</option>
+              <option value={6}>2 Kuartal</option>
+              <option value={9}>3 Kuartal</option>
+            </select>
+          </div>
+          <div>
+            <label style={styles.label}>Kategori Brand</label>
+            <select value={brandGender} onChange={e => setBrandGender(e.target.value)} style={styles.input}>
+              <option value="menswear">Menswear</option>
+              <option value="womenswear">Womenswear</option>
+            </select>
+          </div>
+          <div>
+            <label style={styles.label}>Range Ukuran</label>
+            <select value={sizeRange} onChange={e => setSizeRange(e.target.value)} style={styles.input}>
+              <option value="xs_xl">XS - XL (5 size)</option>
+              <option value="s_xl">S - XL (4 size)</option>
+            </select>
+          </div>
+        </div>
+        {/* Category legend */}
+        <div style={{ marginTop: 14, display: "flex", gap: 10, flexWrap: "wrap" }}>
+          {SKU_CATEGORIES.map(cat => (
+            <div key={cat.value} style={{ display: "flex", alignItems: "center", gap: 6, fontSize: 11, fontFamily: FONT_MONO }}>
+              <span style={{ width: 10, height: 10, borderRadius: "50%", background: cat.color, display: "inline-block" }} />
+              <span style={{ color: cat.color, fontWeight: "bold" }}>{cat.label}</span>
+              <span style={{ color: C.textMuted }}>buffer {cat.buffer}%</span>
+            </div>
+          ))}
+        </div>
       </div>
 
-      <Divider label="Size Breakdown Output"/>
-      <div style={{overflowX:"auto"}}>
-        <table style={{width:"100%",borderCollapse:"collapse",fontSize:11,fontFamily:"'DM Mono',monospace"}}>
-          <thead>
-            <tr style={{borderBottom:`1px solid ${C.border}`}}>
-              <th style={{padding:"7px 8px",textAlign:"left",color:C.dim,fontSize:9,letterSpacing:"0.1em",textTransform:"uppercase",fontWeight:"normal"}}>SKU</th>
-              <th style={{padding:"7px 8px",textAlign:"right",color:C.dim,fontSize:9,letterSpacing:"0.1em",textTransform:"uppercase",fontWeight:"normal"}}>Total</th>
-              {sizes.map(sz=><th key={sz} style={{padding:"7px 8px",textAlign:"right",color:C.dim,fontSize:9,letterSpacing:"0.1em",fontWeight:"normal"}}>{sz}</th>)}
-              <th style={{padding:"7px 8px",textAlign:"right",color:C.dim,fontSize:9,letterSpacing:"0.1em",textTransform:"uppercase",fontWeight:"normal"}}>COGS Total</th>
-            </tr>
-          </thead>
-          <tbody>
-            {breakdown.map((r,i)=>(
-              <tr key={i} style={{borderBottom:`1px solid ${C.border}20`,background:i%2===0?C.s1:C.s2}}>
-                <td style={{padding:"7px 8px",color:C.text,fontWeight:700}}>{r.name}</td>
-                <td style={{padding:"7px 8px",color:C.gold,textAlign:"right",fontWeight:700}}>{NUM(r.total)}</td>
-                {sizes.map(sz=><td key={sz} style={{padding:"7px 8px",color:r.bySize[sz]>0?C.mid:C.dim,textAlign:"right"}}>{r.bySize[sz]>0?NUM(r.bySize[sz]):"-"}</td>)}
-                <td style={{padding:"7px 8px",color:C.orange,textAlign:"right"}}>{IDR(r.cogsTotal)}</td>
+      {/* Revenue Projection - per quarter + monthly breakdown */}
+      <div style={styles.card}>
+        <div style={styles.cardTitle}>Proyeksi Revenue - 3 Kuartal ke Depan</div>
+        <div style={styles.grid3}>
+          {projections.map((q) => {
+            // Per-month breakdown within quarter
+            const monthlyBreakdown = q.months.map(m => {
+              const mi = MONTHS_ALL.indexOf(m);
+              let mRev = 0, mGP = 0;
+              skus.forEach(sku => {
+                const sales = computeAvg(sku) * SEASONS[mi].mult;
+                mRev += sales * sku.price;
+                mGP  += sales * (sku.price - sku.cogs);
+              });
+              return { m, mi, rev: mRev, gp: mGP, mult: SEASONS[mi].mult };
+            });
+            const maxRev = Math.max(...monthlyBreakdown.map(mb => mb.rev));
+            return (
+              <div key={q.q} style={{ border: `1px solid ${C.border}`, borderRadius: 8, overflow: "hidden" }}>
+                {/* Quarter header */}
+                <div style={{ background: C.accentLight, borderBottom: `1px solid ${C.border}`, padding: "10px 14px" }}>
+                  <div style={{ fontSize: 10, fontFamily: FONT_MONO, color: C.accent, fontWeight: "bold", marginBottom: 2 }}>
+                    Q{q.q} - {q.months.join(", ")}
+                  </div>
+                  <div style={{ fontSize: 17, fontWeight: "bold", color: C.text, fontFamily: FONT_MONO }}>{fmt(q.totalRev)}</div>
+                  <div style={{ fontSize: 10, fontFamily: FONT_MONO, color: C.green, marginTop: 2 }}>
+                    GP: {fmt(q.totalGP)} ({pct(q.margin)})
+                  </div>
+                </div>
+                {/* Monthly breakdown */}
+                {monthlyBreakdown.map(mb => {
+                  const barWidth = maxRev > 0 ? (mb.rev / maxRev) * 100 : 0;
+                  const gpMargin = mb.rev > 0 ? mb.gp / mb.rev : 0;
+                  return (
+                    <div key={mb.m} style={{ padding: "10px 14px", borderBottom: `1px solid ${C.border}` }}>
+                      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 4 }}>
+                        <span style={{ fontSize: 11, fontFamily: FONT_MONO, fontWeight: "bold", color: C.text }}>{mb.m}</span>
+                        <span style={{ fontSize: 10, fontFamily: FONT_MONO, color: C.textMuted }}>×{mb.mult} season</span>
+                      </div>
+                      {/* Bar */}
+                      <div style={{ height: 6, background: C.border, borderRadius: 3, marginBottom: 4 }}>
+                        <div style={{ height: "100%", width: barWidth + "%", background: mb.mult >= 2 ? C.gold : mb.mult >= 1.1 ? C.green : "#90a4ae", borderRadius: 3, transition: "width 0.3s" }} />
+                      </div>
+                      <div style={{ display: "flex", justifyContent: "space-between" }}>
+                        <span style={{ fontSize: 11, fontFamily: FONT_MONO, fontWeight: "bold", color: C.text }}>{fmt(mb.rev)}</span>
+                        <span style={{ fontSize: 10, fontFamily: FONT_MONO, color: C.green }}>GP {pct(gpMargin, 1)}</span>
+                      </div>
+                    </div>
+                  );
+                })}
+                <div style={{ padding: "6px 14px", background: C.surfaceAlt }}>
+                  <span style={{ fontSize: 9, fontFamily: FONT_MONO, color: C.textMuted }}>
+                    Gold bar = peak season (×2+)  x  Hijau = naik (×1.1+)
+                  </span>
+                </div>
+              </div>
+            );
+          })}
+        </div>
+        <div style={{ marginTop: 10, fontSize: 11, color: C.textMuted, fontFamily: FONT_MONO }}>
+          * Berdasarkan rata-rata historis × seasonality. Tidak termasuk pertumbuhan organik.
+        </div>
+      </div>
+
+      {/* SKU Table with history */}
+      <div style={styles.card}>
+        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 14 }}>
+          <div style={styles.cardTitle}>Data SKU</div>
+          <button style={styles.btn} onClick={addSku}>+ Tambah SKU</button>
+        </div>
+        <div style={{ overflowX: "auto" }}>
+          <table style={styles.table}>
+            <thead>
+              <tr>
+                {[
+                  "SKU", "Kategori",
+                  prevMonths[0], prevMonths[1], prevMonths[2],
+                  "Avg/Bln", "Daily Sales", "Stok Kini", "Incoming", "Est. Tiba",
+                  "Harga Jual", "HPP", "Lead Time", "Min Order", ""
+                ].map(h => <th key={h} style={styles.th}>{h}</th>)}
               </tr>
-            ))}
-            <tr style={{borderTop:`1px solid ${C.border}`,background:C.s3}}>
-              <td style={{padding:"7px 8px",color:C.gold,fontWeight:700}}>TOTAL</td>
-              <td style={{padding:"7px 8px",color:C.gold,textAlign:"right",fontWeight:700}}>{NUM(breakdown.reduce((a,r)=>a+r.total,0))}</td>
-              {sizes.map(sz=><td key={sz} style={{padding:"7px 8px",color:C.text,textAlign:"right",fontWeight:700}}>{NUM(breakdown.reduce((a,r)=>a+r.bySize[sz],0))}</td>)}
-              <td style={{padding:"7px 8px",color:C.orange,textAlign:"right",fontWeight:700}}>{IDR(breakdown.reduce((a,r)=>a+r.cogsTotal,0))}</td>
-            </tr>
-          </tbody>
-        </table>
+            </thead>
+            <tbody>
+              {skus.map((sku, i) => {
+                const avg = computeAvg(sku);
+                const daily = (avg * SEASONS[forecastMonth].mult / 30).toFixed(1);
+                const cat = getCategoryConfig(sku.category);
+                const hist = sku.hist || [0,0,0];
+                return (
+                  <tr key={i} style={{ borderLeft: `2px solid ${cat.color}` }}>
+                    <td style={styles.td}>
+                      <input type="text" value={sku.name} onChange={e => updateSku(i,"name",e.target.value)}
+                        style={{ ...styles.input, width:110, fontWeight:600 }} />
+                    </td>
+                    <td style={styles.td}>
+                      <select value={sku.category} onChange={e => updateSku(i,"category",e.target.value)}
+                        style={{ ...styles.input, width:120, color:cat.color, fontWeight:600 }}>
+                        {SKU_CATEGORIES.map(c => <option key={c.value} value={c.value}>{c.label}</option>)}
+                      </select>
+                    </td>
+                    {[0,1,2].map(mi => (
+                      <td key={mi} style={styles.td}>
+                        <input type="number" value={hist[mi]||0}
+                          onChange={e => { const h=[...hist]; h[mi]=num(e.target.value); updateSku(i,"hist",h); }}
+                          style={{ ...styles.input, width:65 }} />
+                      </td>
+                    ))}
+                    <td style={{ ...styles.td, color:C.accent, fontWeight:600 }}>
+                      <div>{Math.round(avg)}</div>
+                      <div style={{ fontSize:9, color:C.textMuted }}>{sku.histOverride?"manual":"hist."}</div>
+                    </td>
+                    <td style={{ ...styles.td, color:C.textSecondary, fontWeight:500 }}>{daily}/hr</td>
+                    <td style={styles.td}>
+                      <input type="number" value={sku.currentStock} onChange={e => updateSku(i,"currentStock",e.target.value)}
+                        style={{ ...styles.input, width:75 }} />
+                    </td>
+                    <td style={styles.td}>
+                      <input type="number" value={sku.incomingStock||0} onChange={e => updateSku(i,"incomingStock",e.target.value)}
+                        style={{ ...styles.input, width:75, color:sku.incomingStock>0?C.accent:C.text }} placeholder="0" />
+                    </td>
+                    <td style={styles.td}>
+                      <input type="date" value={sku.incomingDate||""} onChange={e => updateSku(i,"incomingDate",e.target.value)}
+                        style={{ ...styles.input, width:120, fontSize:11 }} />
+                    </td>
+                    {["price","cogs","leadDays","minOrder"].map(f => (
+                      <td key={f} style={styles.td}>
+                        <input type="number" value={sku[f]} onChange={e => updateSku(i,f,e.target.value)}
+                          style={{ ...styles.input, width:80 }} />
+                      </td>
+                    ))}
+                    <td style={styles.td}>
+                      <button style={styles.btnDanger} onClick={() => removeSku(i)}>x</button>
+                    </td>
+                  </tr>
+                );
+              })}
+            </tbody>
+          </table>
+        </div>
+        <div style={{ marginTop:8, fontSize:10, color:C.textMuted, fontFamily:FONT_MONO }}>
+          Avg/Bln dihitung otomatis dari histori 3 bulan. Incoming Stock dihitung hanya jika tiba dalam bulan berjalan.
+        </div>
+      </div>
+
+      {/* Forecast Result + Diagnosis */}
+      <div style={styles.card}>
+        <div style={styles.cardTitle}>Hasil Forecast & Diagnosa Stok</div>
+        <div style={{ overflowX: "auto" }}>
+          <table style={styles.table}>
+            <thead>
+              <tr>
+                {[
+                  "SKU","Kategori","Trend","Daily Sales","Closing "+curMonthLabel,
+                  "Stok Efektif","Days of Stock","Incoming","Reorder Point","Forecast "+nextMonthLabel,
+                  "Restock Qty","Biaya Restock","Status"
+                ].map(h => <th key={h} style={styles.th}>{h}</th>)}
+              </tr>
+            </thead>
+            <tbody>
+              {skus.map((sku, i) => {
+                const c = skuCalcs[i];
+                const cat = getCategoryConfig(sku.category);
+                const trendColor = c.trend>10?C.positive:c.trend<-10?C.negative:C.textMuted;
+                const rowBg = c.stockStatus==="critical"||c.stockStatus==="deadstock_risk"
+                  ? C.negativeLight : c.stockStatus==="overstock" ? C.warningLight : "transparent";
+                return (
+                  <tr key={i} style={{ background:rowBg, borderLeft:`2px solid ${cat.color}` }}>
+                    <td style={{ ...styles.td, fontWeight:600 }}>{sku.name}</td>
+                    <td style={{ ...styles.td, color:cat.color, fontSize:11, fontWeight:500 }}>{cat.label}</td>
+                    <td style={{ ...styles.td, color:trendColor, fontWeight:600 }}>
+                      {c.trend!==0?(c.trend>0?"▲":"▼")+Math.abs(c.trend).toFixed(0)+"%":"-"}
+                    </td>
+                    <td style={{ ...styles.td, color:C.textSecondary }}>{c.dailySales.toFixed(1)}/hr</td>
+                    <td style={{ ...styles.td, fontWeight:600, color:c.closingStockThisMonth<c.safetyStock?C.negative:C.positive }}>
+                      {Math.round(c.closingStockThisMonth)} unit
+                      {c.ddSpike>0 && <div style={{ fontSize:9, color:C.warning, marginTop:1 }}>DD +{Math.round(c.ddSpike)} est.</div>}
+                    </td>
+                    <td style={{ ...styles.td, fontWeight:600 }}>
+                      {c.totalEffectiveStock}
+                      {c.effectiveIncoming>0 && <div style={{ fontSize:9, color:C.accent }}>+{c.effectiveIncoming} WIP</div>}
+                    </td>
+                    <td style={{ ...styles.td, fontWeight:600, color:c.daysOfStock<14?C.negative:c.daysOfStock<30?C.warning:C.positive }}>
+                      {c.daysOfStock<900?c.daysOfStock.toFixed(0)+" hr":"inf"}
+                    </td>
+                    <td style={{ ...styles.td, color:c.effectiveIncoming>0?C.accent:C.textMuted }}>
+                      {c.effectiveIncoming>0?(
+                        <div>
+                          <div style={{ fontWeight:600 }}>{c.effectiveIncoming} unit</div>
+                          <div style={{ fontSize:9, color:C.textMuted }}>{c.incomingDaysUntil!=null?(c.incomingDaysUntil<=0?"Tiba hari ini":c.incomingDaysUntil+" hr lagi"):""}</div>
+                        </div>
+                      ):"-"}
+                    </td>
+                    <td style={styles.td}>{Math.round(c.reorderPoint)}</td>
+                    <td style={styles.td}>{Math.round(c.adjustedSales)}</td>
+                    <td style={{ ...styles.td, color:c.restock>0?C.negative:C.positive, fontWeight:600 }}>
+                      {sku.category==="deadstock"?<span style={{ color:C.negative }}>STOP</span>:c.restock>0?c.restock:"-"}
+                    </td>
+                    <td style={{ ...styles.td, color:c.restockCost>0?C.negative:C.positive }}>
+                      {c.restockCost>0?fmt(c.restockCost):"-"}
+                    </td>
+                    <td style={{ ...styles.td, color:statusColor[c.stockStatus], fontWeight:600 }}>
+                      {statusLabel[c.stockStatus]}
+                    </td>
+                  </tr>
+                );
+              })}
+              <tr style={{ background:C.surfaceAlt }}>
+                <td style={{ ...styles.td, fontWeight:600 }} colSpan={11}>Total Restock</td>
+                <td style={{ ...styles.td, fontWeight:600, color:C.negative }}>{fmt(totalRestockCost)}</td>
+                <td style={styles.td} />
+              </tr>
+            </tbody>
+          </table>
+        </div>
+
+        {/* Diagnosa Per SKU - category-aware */}
+        <div style={{ marginTop: 20 }}>
+          <div style={{ fontSize: 12, fontFamily: FONT_MONO, fontWeight: "bold", color: C.text, marginBottom: 10 }}> Diagnosa & Saran Per SKU:</div>
+          {skus.map((sku, i) => {
+            const c = skuCalcs[i];
+            const cat = getCategoryConfig(sku.category);
+            const trendTxt = c.trend > 10 ? `Tren naik ${c.trend.toFixed(0)}% - validasi bagus untuk pertimbangkan buffer lebih tinggi.`
+              : c.trend < -10 ? `Tren turun ${Math.abs(c.trend).toFixed(0)}% - pertimbangkan turunkan kategori jika berlanjut.`
+              : "";
+
+            // Stock action message
+            const stockMsg = {
+              critical: `Stok ${sku.name} KRITIS (${sku.currentStock} unit, sisa ${c.daysOfStock.toFixed(0)} hari). SEGERA buat PO minimal ${c.restock} unit.`,
+              low: `Stok ${sku.name} mendekati reorder point (${Math.round(c.reorderPoint)} unit). Mulai proses pembelian sekarang - lead time ${sku.leadDays} hari.`,
+              overstock: `${sku.name} overstock - kelebihan +/-${Math.round(c.excessStock)} unit (${c.daysOfStock.toFixed(0)} hari). Tahan restock, dorong penjualan via promo.`,
+              deadstock_risk: `${sku.name} deadstock - ${c.daysOfStock < 900 ? c.daysOfStock.toFixed(0)+" hari" : "stok stagnan"}. Jalankan flash sale atau bundling segera.`,
+              ok: null,
+            }[c.stockStatus];
+
+            return (
+              <div key={i} style={{ marginBottom: 12, border: `1px solid ${cat.color}30`, borderRadius: 3, overflow: "hidden" }}>
+                {/* Category header */}
+                <div style={{ background: cat.color + "15", borderBottom: `1px solid ${cat.color}30`, padding: "8px 14px", display: "flex", alignItems: "center", gap: 8 }}>
+                  <span style={{ fontSize: 13, fontWeight: "bold", color: cat.color }}>{cat.label}</span>
+                  <span style={{ fontSize: 13, fontWeight: "bold", color: C.text }}>- {sku.name}</span>
+                  {trendTxt && <span style={{ fontSize: 11, fontFamily: FONT_MONO, color: c.trend > 0 ? C.green : C.red, marginLeft: "auto" }}>{c.trend > 0 ? "▲" : "▼"} {Math.abs(c.trend).toFixed(0)}% trend</span>}
+                </div>
+                <div style={{ padding: "10px 14px" }}>
+                  {/* Stock action */}
+                  {stockMsg && (
+                    <div style={{ ...styles.alert(c.stockStatus === "critical" || c.stockStatus === "deadstock_risk" ? "red" : "yellow"), marginBottom: 8 }}>
+                      {stockMsg}
+                    </div>
+                  )}
+                  {/* Category advice */}
+                  <div style={{ fontSize: 12, fontFamily: FONT_MONO, color: C.text, lineHeight: 1.6, padding: "8px 12px", background: cat.color + "08", borderRadius: 4, borderLeft: `2px solid ${cat.color}` }}>
+                    <span style={{ fontWeight: "bold", color: cat.color }}>Saran ({cat.label}): </span>{cat.advice}
+                  </div>
+                  {/* Trend context */}
+                  {trendTxt && (
+                    <div style={{ fontSize: 11, fontFamily: FONT_MONO, color: C.textMuted, marginTop: 6 }}>{trendTxt}</div>
+                  )}
+                </div>
+              </div>
+            );
+          })}
+        </div>
       </div>
     </div>
   );
 }
 
-// ─── MODULE 4: BCG MATRIX ─────────────────────────────────────────────────────
-function BCGModule() {
-  const [thresholds, setThresholds] = useLocalState("bcg_thresholds", {deadstock:90,slowmove:45,bestDio:20,ssrBest:2.0,revShareStar:0.15});
-  const [skuData, setSkuData] = useLocalState("bcg_skus", {});
-  
-  // Auto-pull SKU names from Forecast, merge with saved BCG data
-  const forecastNames = (() => {
-    try {
-      const stored = localStorage.getItem("brandos_forecast_skus");
-      const fSkus = stored ? JSON.parse(stored) : [];
-      return fSkus.filter(sk=>sk.name).map(sk=>sk.name);
-    } catch { return []; }
+// ===========================================================================
+// --- CASHFLOW SIMULATOR ----------------------------------------------------
+// ===========================================================================
+function CashflowSimulator({ skuNames }) {
+  const defaultObligations = () => [
+    { id: 1, name: "Gaji Tim", amount: 15000000, dueDay: 25, type: "payroll", recurring: true },
+    { id: 2, name: "Pembayaran Vendor A", amount: 8000000, dueDay: 10, type: "vendor", recurring: true },
+    { id: 3, name: "Sewa Kantor", amount: 3500000, dueDay: 1, type: "opex", recurring: true },
+  ];
+
+  const [kasAwal, setKasAwal] = useState(() => num(localStorage.getItem("cf_kas")) || 25000000);
+  const [estimasiRevBulanIni, setEstimasiRevBulanIni] = useState(() => num(localStorage.getItem("cf_rev")) || 50000000);
+  const [estimasiCogsRatio, setEstimasiCogsRatio] = useState(() => num(localStorage.getItem("cf_cogs")) || 47);
+  const [estimasiAdSpend, setEstimasiAdSpend] = useState(() => num(localStorage.getItem("cf_ads")) || 6500000);
+  const [obligations, setObligations] = useState(() => {
+    try { return JSON.parse(localStorage.getItem("cf_obligations")) || defaultObligations(); }
+    catch { return defaultObligations(); }
+  });
+  const [newObl, setNewObl] = useState({ name: "", amount: "", dueDay: "", type: "opex", recurring: true });
+  const [restockAmount, setRestockAmount] = useState(() => num(localStorage.getItem("cf_restock")) || 0);
+  const [viewMonth, setViewMonth] = useState(new Date().getMonth());
+
+  // Persist
+  useEffect(() => { localStorage.setItem("cf_kas", kasAwal); }, [kasAwal]);
+  useEffect(() => { localStorage.setItem("cf_rev", estimasiRevBulanIni); }, [estimasiRevBulanIni]);
+  useEffect(() => { localStorage.setItem("cf_cogs", estimasiCogsRatio); }, [estimasiCogsRatio]);
+  useEffect(() => { localStorage.setItem("cf_ads", estimasiAdSpend); }, [estimasiAdSpend]);
+  useEffect(() => { localStorage.setItem("cf_obligations", JSON.stringify(obligations)); }, [obligations]);
+  useEffect(() => { localStorage.setItem("cf_restock", restockAmount); }, [restockAmount]);
+
+  const addObligation = () => {
+    if (!newObl.name || !newObl.amount || !newObl.dueDay) return;
+    setObligations([...obligations, { ...newObl, id: Date.now(), amount: num(newObl.amount), dueDay: num(newObl.dueDay) }]);
+    setNewObl({ name: "", amount: "", dueDay: "", type: "opex", recurring: true });
+  };
+  const removeObligation = (id) => setObligations(obligations.filter((o) => o.id !== id));
+
+  // -- Calculations ----------------------------------------------
+  const cogsTotal = estimasiRevBulanIni * (estimasiCogsRatio / 100);
+  const totalObligations = obligations.reduce((s, o) => s + o.amount, 0);
+  const totalOutflow = cogsTotal + estimasiAdSpend + totalObligations + restockAmount;
+  const netCashflow = estimasiRevBulanIni - totalOutflow;
+  const endKas = kasAwal + netCashflow;
+  const runwayMonths = totalOutflow > 0 ? kasAwal / totalOutflow : 999;
+
+  // -- Diagnosa -------------------------------------------------
+  // Read forecast data for cashflow integration
+  const forecastSkusCF = (() => {
+    try { return JSON.parse(localStorage.getItem("forecast_skus_v2")) || []; } catch { return []; }
   })();
-  const allNames = [...new Set([...forecastNames, ...Object.keys(skuData)])].filter(Boolean);
-  const skus = allNames.length > 0 ? allNames.map(name => ({name, ...(skuData[name]||{units30:"",units90:"",stock:"",price:"",cogs:""})})) : Array(6).fill(null).map((_,i)=>({name:`SKU ${i+1}`,units30:"",units90:"",stock:"",price:"",cogs:""}));
-  const updSku = (i,k,v) => {
-    const name = skus[i].name;
-    setSkuData(d=>({...d,[name]:{...(d[name]||{}), [k]:v}}));
+  const totalInventoryValue = forecastSkusCF.reduce((s,f) => s + (f.currentStock||0)*(f.cogs||0), 0);
+  const totalInventoryRetail = forecastSkusCF.reduce((s,f) => s + (f.currentStock||0)*(f.price||0), 0);
+  const overstockSkusCF = forecastSkusCF.filter(f => {
+    const avg = f.avgSales || 50;
+    return f.currentStock > avg * 2.5;
+  });
+  const liquidatableValue = overstockSkusCF.reduce((s,f) => s + (f.currentStock||0)*(f.price||0)*0.65, 0);
+
+  const getDiagnosa = () => {
+    const alerts = [];
+
+    // Primary cashflow status
+    if (endKas < 0) {
+      alerts.push({ type: "red", msg: "KAS HABIS - Proyeksi kas akhir bulan negatif. Tunda restock, percepat penagihan, atau cari modal tambahan segera." });
+      if (liquidatableValue > 0) alerts.push({ type: "warning", msg: `Opsi darurat: ${overstockSkusCF.length} SKU overstock dapat dilikuidasi. Estimasi nilai likuidasi (65% harga) = ${fmt(liquidatableValue)}. Prioritaskan flash sale segera untuk perbaiki posisi kas.` });
+    } else if (endKas < totalObligations) {
+      alerts.push({ type: "red", msg: `Kas akhir bulan (${fmt(endKas)}) tidak cukup untuk kewajiban bulan depan (${fmt(totalObligations)}). Risiko gagal bayar tinggi.` });
+      if (liquidatableValue > 0) alerts.push({ type: "warning", msg: `Pertimbangkan likuidasi stok overstock senilai ${fmt(liquidatableValue)} untuk perbaiki posisi kas sebelum jatuh tempo.` });
+    } else if (endKas < totalObligations * 1.5) {
+      alerts.push({ type: "warning", msg: `Kas akhir bulan tipis (${fmt(endKas)}). Buffer ${(endKas/totalObligations).toFixed(1)}x kewajiban. Tahan restock besar sampai posisi kas membaik.` });
+    } else {
+      alerts.push({ type: "positive", msg: `Posisi kas aman. Buffer ${(endKas/totalObligations).toFixed(1)}x kewajiban bulanan. Runway ~ ${runwayMonths.toFixed(1)} bulan.` });
+    }
+
+    // Restock vs kas
+    if (restockAmount > kasAwal * 0.4) alerts.push({ type: "warning", msg: `Restock (${fmt(restockAmount)}) menghabiskan ${((restockAmount/kasAwal)*100).toFixed(0)}% kas. Pertimbangkan cicil PO atau negosiasi tempo vendor 30-45 hari.` });
+
+    // Payroll
+    const totalPayroll = obligations.filter(o=>o.type==="payroll").reduce((s,o)=>s+o.amount,0);
+    if (totalPayroll > estimasiRevBulanIni * 0.25) alerts.push({ type: "warning", msg: `Payroll (${fmt(totalPayroll)}) melebihi 25% revenue. Rasio payroll-to-revenue perlu diperhatikan untuk keberlanjutan bisnis.` });
+
+    // Ad spend
+    if (estimasiAdSpend > estimasiRevBulanIni * 0.15) alerts.push({ type: "warning", msg: `Ad spend (${fmt(estimasiAdSpend)}) di atas 15% revenue. Pastikan ROAS masih profitable sebelum scale lebih jauh.` });
+
+    // Inventory asset position
+    if (totalInventoryValue > 0) alerts.push({ type: "accent", msg: `Nilai aset inventori saat ini: ${fmt(totalInventoryValue)} (at cost) / ${fmt(totalInventoryRetail)} (retail price). ${overstockSkusCF.length>0?`${overstockSkusCF.length} SKU overstock - nilai yang bisa dilikuidasi: ~${fmt(liquidatableValue)}.`:"Seluruh stok dalam kondisi sehat."}` });
+
+    return alerts;
   };
 
-  const totalRev30 = skus.reduce((a,sk)=>(f(sk.units30)||0)*(f(sk.price)||0)+a,0);
+  const diagnosa = getDiagnosa();
 
-  const classified = skus.map(sk => {
-    const u30=f(sk.units30)||0, stock=f(sk.stock)||0, price=f(sk.price)||0;
-    const avgDaily = u30/30;
-    const dio = avgDaily>0 ? stock/avgDaily : 999;
-    const ssr = u30>0 ? stock/u30 : 0;
-    const rev30 = u30*price;
-    const revShare = totalRev30>0 ? rev30/totalRev30 : 0;
-    const velocity = skus.filter(s=>(f(s.units30)||0)>0).length>0 ? u30/(skus.reduce((a,s)=>a+(f(s.units30)||0),0)/skus.filter(s=>(f(s.units30)||0)>0).length||1) : 0;
-    let quadrant;
-    if (dio > thresholds.deadstock) quadrant = "☠ DEADSTOCK";
-    else if (dio > thresholds.slowmove) quadrant = "🐌 SLOW MOVE";
-    else if (revShare >= thresholds.revShareStar && velocity > 1) quadrant = "⭐ STAR";
-    else if (revShare >= thresholds.revShareStar && velocity <= 1) quadrant = "🐄 CASH COW";
-    else if (revShare < thresholds.revShareStar && velocity > 1) quadrant = "❓ QUESTION MARK";
-    else quadrant = "🐕 DOG";
-    return {...sk, dio, ssr, rev30, revShare, velocity, quadrant};
+  // -- Kalender tagihan ------------------------------------------
+  const daysInMonth = new Date(2025, viewMonth + 1, 0).getDate();
+  const monthName = MONTHS_ALL[viewMonth];
+  const oblByDay = {};
+  obligations.forEach((o) => {
+    const day = Math.min(o.dueDay, daysInMonth);
+    if (!oblByDay[day]) oblByDay[day] = [];
+    oblByDay[day].push(o);
   });
 
-  const summary = Object.keys(BCG_COLORS).map(q=>({
-    q, count:classified.filter(r=>r.quadrant===q).length,
-    rev:classified.filter(r=>r.quadrant===q).reduce((a,r)=>a+r.rev30,0),
-    avgDio:classified.filter(r=>r.quadrant===q).length>0?classified.filter(r=>r.quadrant===q).reduce((a,r)=>a+r.dio,0)/classified.filter(r=>r.quadrant===q).length:0
-  }));
+  // Cashflow by week
+  const weeklyFlow = [1, 8, 15, 22].map((startDay, wi) => {
+    const endDay = wi < 3 ? startDay + 6 : daysInMonth;
+    const outflow = obligations.filter((o) => o.dueDay >= startDay && o.dueDay <= endDay).reduce((s, o) => s + o.amount, 0);
+    const inflow = (estimasiRevBulanIni / 4); // evenly distributed (simplified)
+    return { week: wi + 1, startDay, endDay, inflow, outflow, net: inflow - outflow };
+  });
 
-  const actions = {"⭐ STAR":"Pertahankan & scale. Buffer stok lebih tinggi.","🐄 CASH COW":"Jaga konsistensi. Monitor margin.","❓ QUESTION MARK":"Evaluasi. Naikkan awareness atau reposisi.","🐕 DOG":"Pertimbangkan discontinue atau promo clearance.","🐌 SLOW MOVE":"Promo agresif atau bundle. Kurangi restock.","☠ DEADSTOCK":"Clearance segera. Jangan restock."};
+  const typeColors = { payroll: "#c0392b", vendor: "#2980b9", opex: "#8e44ad", ads: "#e67e22", other: "#7f8c8d" };
+  const typeLabels = { payroll: "Payroll", vendor: "Vendor", opex: "Opex", ads: "Ads", other: "Lainnya" };
 
   return (
     <div>
-      <div style={{display:"grid",gridTemplateColumns:"repeat(5,1fr)",gap:10,marginBottom:20}}>
-        {[["DIO Deadstock (>hari)","deadstock"],["DIO Slow Move (>hari)","slowmove"],["DIO Best Seller (<hari)","bestDio"],["SSR Best Seller (>x)","ssrBest"],["Rev Share Star (>%)","revShareStar"]].map(([l,k])=>(
-          <Field key={k} label={l}><Input value={thresholds[k]} onChange={v=>setThresholds(t=>({...t,[k]:parseFloat(v)||0}))} type="number"/></Field>
-        ))}
+      <h2 style={{ fontSize: 15, fontWeight: 600, marginBottom: 4, fontFamily: FONT_MONO, letterSpacing: "0.04em", color: C.text }}>Cashflow Simulator</h2>
+      <p style={{ fontSize: 12, color: C.textMuted, fontFamily: FONT_MONO, marginBottom: 24 }}>
+        Posisi kas, proyeksi akhir bulan, kalender tagihan, dan diagnosa terintegrasi dengan forecast stok.
+      </p>
+
+      {/* Diagnosa Alerts */}
+      {diagnosa.map((d, i) => <div key={i} style={styles.alert(d.type)}>{d.msg}</div>)}
+
+      {/* KPI Row */}
+      <div style={{ ...styles.grid3, marginBottom: 20 }}>
+        <div style={{ ...styles.kpiBox, borderLeft: `2px solid ${C.accent}` }}>
+          <div style={styles.kpiLabel}>Kas Saat Ini</div>
+          <div style={styles.kpiValue}>{fmt(kasAwal)}</div>
+          <div style={styles.kpiSub}>Saldo awal bulan</div>
+        </div>
+        <div style={{ ...styles.kpiBox, borderLeft: `3px solid ${netCashflow >= 0 ? C.green : C.red}` }}>
+          <div style={styles.kpiLabel}>Net Cashflow Bulan Ini</div>
+          <div style={{ ...styles.kpiValue, color: netCashflow >= 0 ? C.positive : C.negative }}>{fmt(netCashflow)}</div>
+          <div style={styles.kpiSub}>Revenue - semua outflow</div>
+        </div>
+        <div style={{ ...styles.kpiBox, borderLeft: `3px solid ${endKas >= totalObligations * 1.5 ? C.green : endKas >= 0 ? C.yellow : C.red}` }}>
+          <div style={styles.kpiLabel}>Proyeksi Kas Akhir Bulan</div>
+          <div style={{ ...styles.kpiValue, color: endKas >= 0 ? C.text : C.negative }}>{fmt(endKas)}</div>
+          <div style={styles.kpiSub}>Runway ~ {runwayMonths < 100 ? runwayMonths.toFixed(1) + " bln" : "inf"}</div>
+        </div>
       </div>
 
-      <Divider label="SKU Input"/>
-      <div style={{overflowX:"auto",marginBottom:12}}>
-        <table style={{width:"100%",borderCollapse:"collapse",fontSize:11,fontFamily:"'DM Mono',monospace"}}>
-          <thead>
-            <tr style={{borderBottom:`1px solid ${C.border}`}}>
-              {["SKU / Produk","Units Terjual (30hr)","Units Terjual (90hr)","Stok Sekarang","Harga Jual","COGS/unit",""].map(h=>(
-                <th key={h} style={{padding:"7px 8px",textAlign:"left",color:C.dim,fontSize:9,letterSpacing:"0.1em",textTransform:"uppercase",fontWeight:"normal"}}>{h}</th>
+      {/* Input Panel */}
+      <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 20, marginBottom: 20 }}>
+        {/* Posisi Kas & Revenue */}
+        <div style={styles.card}>
+          <div style={styles.cardTitle}>Posisi Kas & Revenue</div>
+          <div style={{ display: "grid", gap: 12 }}>
+            {[
+              { label: "Saldo Kas Awal Bulan (Rp)", val: kasAwal, set: setKasAwal },
+              { label: "Estimasi Revenue Bulan Ini (Rp)", val: estimasiRevBulanIni, set: setEstimasiRevBulanIni },
+              { label: "COGS Ratio (%)", val: estimasiCogsRatio, set: setEstimasiCogsRatio },
+              { label: "Budget Ad Spend (Rp)", val: estimasiAdSpend, set: setEstimasiAdSpend },
+              { label: "Restock / PO Bulan Ini (Rp)", val: restockAmount, set: setRestockAmount },
+            ].map(({ label, val, set }) => (
+              <div key={label}>
+                <label style={styles.label}>{label}</label>
+                <input type="number" value={val} onChange={(e) => set(num(e.target.value))} style={styles.input} />
+              </div>
+            ))}
+          </div>
+        </div>
+
+        {/* Rincian Outflow */}
+        <div style={styles.card}>
+          <div style={styles.cardTitle}>Rincian Cashflow</div>
+          <table style={styles.table}>
+            <tbody>
+              {[
+                { label: "Revenue", value: estimasiRevBulanIni, positive: true },
+                { label: `COGS (${estimasiCogsRatio}%)`, value: -cogsTotal },
+                { label: "Ad Spend", value: -estimasiAdSpend },
+                { label: "Restock / PO", value: -restockAmount },
+                ...obligations.map((o) => ({ label: o.name, value: -o.amount, type: o.type })),
+              ].map((row, i) => (
+                <tr key={i} style={{ borderBottom: `1px solid ${C.border}` }}>
+                  <td style={{ ...styles.td, color: C.textMuted }}>{row.label}</td>
+                  <td style={{ ...styles.td, textAlign: "right", fontWeight: "bold", color: row.value >= 0 ? C.green : C.red }}>
+                    {row.value >= 0 ? "+" : ""}{fmt(Math.abs(row.value))}
+                  </td>
+                </tr>
               ))}
+              <tr style={{ background: C.surfaceAlt }}>
+                <td style={{ ...styles.td, fontWeight: "bold" }}>NET CASHFLOW</td>
+                <td style={{ ...styles.td, textAlign: "right", fontWeight: "bold", color: netCashflow >= 0 ? C.positive : C.negative }}>
+                  {netCashflow >= 0 ? "+" : ""}{fmt(netCashflow)}
+                </td>
+              </tr>
+              <tr style={{ background: C.goldLight }}>
+                <td style={{ ...styles.td, fontWeight: "bold", color: C.accent }}>KAS AKHIR BULAN</td>
+                <td style={{ ...styles.td, textAlign: "right", fontWeight: "bold", color: endKas >= 0 ? C.accent : C.negative }}>
+                  {fmt(endKas)}
+                </td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+      </div>
+
+      {/* Tambah Kewajiban */}
+      <div style={styles.card}>
+        <div style={styles.cardTitle}>Kalender Tagihan & Kewajiban</div>
+
+        {/* Add form */}
+        <div style={{ display: "grid", gridTemplateColumns: "2fr 1fr 0.7fr 1fr 0.5fr auto", gap: 10, marginBottom: 16, alignItems: "end" }}>
+          {[
+            { key: "name", label: "Nama Tagihan", type: "text", placeholder: "Gaji, Vendor..." },
+            { key: "amount", label: "Jumlah (Rp)", type: "number", placeholder: "5000000" },
+            { key: "dueDay", label: "Tanggal Jatuh Tempo", type: "number", placeholder: "15" },
+          ].map(({ key, label, type, placeholder }) => (
+            <div key={key}>
+              <label style={styles.label}>{label}</label>
+              <input type={type} value={newObl[key]} placeholder={placeholder}
+                onChange={(e) => setNewObl({ ...newObl, [key]: e.target.value })} style={styles.input} />
+            </div>
+          ))}
+          <div>
+            <label style={styles.label}>Tipe</label>
+            <select value={newObl.type} onChange={(e) => setNewObl({ ...newObl, type: e.target.value })} style={styles.input}>
+              {Object.entries(typeLabels).map(([k, v]) => <option key={k} value={k}>{v}</option>)}
+            </select>
+          </div>
+          <div>
+            <label style={styles.label}>Recurring</label>
+            <select value={newObl.recurring} onChange={(e) => setNewObl({ ...newObl, recurring: e.target.value === "true" })} style={styles.input}>
+              <option value="true">Ya</option>
+              <option value="false">Sekali</option>
+            </select>
+          </div>
+          <div>
+            <label style={styles.label}>&nbsp;</label>
+            <button style={styles.btn} onClick={addObligation}>+ Tambah</button>
+          </div>
+        </div>
+
+        {/* Obligation list */}
+        <table style={styles.table}>
+          <thead>
+            <tr>
+              {["Nama", "Tipe", "Jumlah", "Jatuh Tempo", "Recurring", ""].map((h) => <th key={h} style={styles.th}>{h}</th>)}
             </tr>
           </thead>
           <tbody>
-            {skus.map((sk,i)=>(
-              <tr key={i} style={{borderBottom:`1px solid ${C.border}20`}}>
-                <td style={{padding:"5px 6px"}}><input value={sk.name} onChange={e=>updSku(i,"name",e.target.value)} placeholder={`SKU ${i+1}`} style={{background:"transparent",border:"none",outline:"none",color:forecastNames.includes(sk.name)?C.gold:C.text,fontFamily:"'DM Mono',monospace",fontSize:11,width:100}}/></td>
-                {["units30","units90","stock","price","cogs"].map(k=>(
-                  <td key={k} style={{padding:"5px 6px"}}><input type="number" value={sk[k]} onChange={e=>updSku(i,k,e.target.value)} placeholder="0" style={{background:"transparent",border:"none",outline:"none",color:C.text,fontFamily:"'DM Mono',monospace",fontSize:11,width:80,textAlign:"right"}}/></td>
-                ))}
-                <td><button onClick={()=>setSkus(s=>s.filter((_,idx)=>idx!==i))} style={{background:"none",border:"none",color:C.dim,cursor:"pointer",fontSize:14}}>×</button></td>
+            {obligations.sort((a, b) => a.dueDay - b.dueDay).map((o) => (
+              <tr key={o.id}>
+                <td style={{ ...styles.td, fontWeight: "bold" }}>{o.name}</td>
+                <td style={styles.td}>
+                  <span style={{ background: typeColors[o.type] || "#888", color: "#fff", padding: "2px 8px", borderRadius: 3, fontSize: 10, fontFamily: FONT_MONO }}>
+                    {typeLabels[o.type] || o.type}
+                  </span>
+                </td>
+                <td style={{ ...styles.td, color: C.red, fontWeight: "bold" }}>{fmt(o.amount)}</td>
+                <td style={styles.td}>Tgl {o.dueDay}</td>
+                <td style={styles.td}>{o.recurring ? "v Bulanan" : "Sekali"}</td>
+                <td style={styles.td}><button style={styles.btnDanger} onClick={() => removeObligation(o.id)}>x</button></td>
               </tr>
             ))}
-          </tbody>
-        </table>
-      </div>
-      <Btn secondary onClick={()=>setSkus(s=>[...s,{name:`SKU ${s.length+1}`,units30:"",units90:"",stock:"",price:"",cogs:""}])}>+ SKU</Btn>
-
-      <Divider label="BCG Classification"/>
-      <div style={{overflowX:"auto",marginBottom:20}}>
-        <table style={{width:"100%",borderCollapse:"collapse",fontSize:11,fontFamily:"'DM Mono',monospace"}}>
-          <thead>
-            <tr style={{borderBottom:`1px solid ${C.border}`}}>
-              {["SKU","DIO (hari)","SSR (x)","Rev Share","Velocity","BCG Kuadran"].map(h=>(
-                <th key={h} style={{padding:"7px 8px",textAlign:"left",color:C.dim,fontSize:9,letterSpacing:"0.1em",textTransform:"uppercase",fontWeight:"normal"}}>{h}</th>
-              ))}
+            <tr style={{ background: C.surfaceAlt }}>
+              <td style={{ ...styles.td, fontWeight: "bold" }} colSpan={2}>TOTAL KEWAJIBAN TETAP</td>
+              <td style={{ ...styles.td, fontWeight: "bold", color: C.red }}>{fmt(totalObligations)}</td>
+              <td colSpan={3} style={styles.td}></td>
             </tr>
-          </thead>
-          <tbody>
-            {classified.filter(r=>r.name).map((r,i)=>{
-              const qc = BCG_COLORS[r.quadrant]||C.mid;
-              return (
-                <tr key={i} style={{borderBottom:`1px solid ${C.border}20`,background:i%2===0?C.s1:C.s2}}>
-                  <td style={{padding:"7px 8px",color:C.text}}>{r.name}</td>
-                  <td style={{padding:"7px 8px",textAlign:"right",color:r.dio>thresholds.deadstock?C.red:r.dio>thresholds.slowmove?C.orange:C.green}}>{r.dio===999?"—":r.dio.toFixed(0)+" hr"}</td>
-                  <td style={{padding:"7px 8px",textAlign:"right",color:r.ssr<1?C.red:r.ssr<2?C.orange:C.green}}>{r.ssr.toFixed(2)}x</td>
-                  <td style={{padding:"7px 8px",textAlign:"right",color:C.mid}}>{PCT(r.revShare*100)}</td>
-                  <td style={{padding:"7px 8px",textAlign:"right",color:r.velocity>1?C.green:C.mid}}>{r.velocity.toFixed(2)}x</td>
-                  <td style={{padding:"7px 8px"}}><Tag c={qc}>{r.quadrant}</Tag></td>
-                </tr>
-              );
-            })}
           </tbody>
         </table>
+
+        {/* Weekly cashflow visualization */}
+        <div style={{ marginTop: 24 }}>
+          <div style={{ fontSize: 12, fontFamily: FONT_MONO, color: C.accent, fontWeight: "bold", marginBottom: 12, letterSpacing: "0.1em" }}>
+            ALIRAN KAS MINGGUAN - {monthName.toUpperCase()}
+          </div>
+          <div style={{ display: "grid", gridTemplateColumns: "repeat(4, 1fr)", gap: 10 }}>
+            {weeklyFlow.map((w) => (
+              <div key={w.week} style={{ background: C.surfaceAlt, borderRadius: 6, padding: "12px 14px", borderLeft: `3px solid ${w.net >= 0 ? C.green : C.red}` }}>
+                <div style={{ fontSize: 11, fontFamily: FONT_MONO, color: C.textMuted, marginBottom: 4 }}>Minggu {w.week} (Tgl {w.startDay}-{w.endDay})</div>
+                <div style={{ fontSize: 12, fontFamily: FONT_MONO, color: C.green }}>+{fmt(w.inflow)}</div>
+                <div style={{ fontSize: 12, fontFamily: FONT_MONO, color: C.red }}>-{fmt(w.outflow)}</div>
+                <div style={{ fontSize: 13, fontFamily: FONT_MONO, fontWeight: "bold", color: w.net >= 0 ? C.positive : C.negative, marginTop: 4 }}>
+                  {w.net >= 0 ? "+" : ""}{fmt(w.net)}
+                </div>
+                {obligations.filter((o) => o.dueDay >= w.startDay && o.dueDay <= w.endDay).map((o) => (
+                  <div key={o.id} style={{ fontSize: 10, fontFamily: FONT_MONO, color: C.textMuted, marginTop: 2 }}>- Tgl {o.dueDay}: {o.name}</div>
+                ))}
+              </div>
+            ))}
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// ===========================================================================
+// --- BUSINESS CANVAS -------------------------------------------------------
+// ===========================================================================
+function BusinessCanvas() {
+  const fields = [
+    { key: "vp", label: "Value Proposition", placeholder: "Apa yang membuat brand kamu unik dan bernilai bagi pelanggan?" },
+    { key: "cs", label: "Customer Segments", placeholder: "Siapa target pelanggan utama kamu?" },
+    { key: "ch", label: "Channels", placeholder: "Bagaimana kamu menjangkau pelanggan? (Shopee, TikTok, Offline...)" },
+    { key: "cr", label: "Customer Relationships", placeholder: "Bagaimana kamu membangun dan menjaga hubungan dengan pelanggan?" },
+    { key: "rs", label: "Revenue Streams", placeholder: "Dari mana saja pendapatan brand kamu?" },
+    { key: "kr", label: "Key Resources", placeholder: "Aset utama apa yang dibutuhkan bisnis kamu?" },
+    { key: "ka", label: "Key Activities", placeholder: "Aktivitas utama apa yang harus dilakukan?" },
+    { key: "kp", label: "Key Partners", placeholder: "Siapa mitra strategis kamu? (Vendor, supplier, distributor...)" },
+    { key: "cs2", label: "Cost Structure", placeholder: "Apa saja biaya terbesar dalam bisnis kamu?" },
+  ];
+  const [data, setData] = useState(() => {
+    try { return JSON.parse(localStorage.getItem("canvas")) || {}; } catch { return {}; }
+  });
+  useEffect(() => { localStorage.setItem("canvas", JSON.stringify(data)); }, [data]);
+  return (
+    <div>
+      <h2 style={{ fontSize: 15, fontWeight: 600, marginBottom: 4, fontFamily: FONT_MONO, letterSpacing: "0.04em", color: C.text }}>Business Canvas</h2>
+      <p style={{ fontSize: 12, color: C.textMuted, fontFamily: FONT_MONO, marginBottom: 24 }}>Model bisnis 1 halaman - 9 building blocks.</p>
+      <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 16 }}>
+        {fields.map((f) => (
+          <div key={f.key} style={styles.card}>
+            <div style={styles.cardTitle}>{f.label}</div>
+            <textarea value={data[f.key] || ""} onChange={(e) => setData({ ...data, [f.key]: e.target.value })}
+              placeholder={f.placeholder}
+              style={{ ...styles.input, height: 100, resize: "vertical", fontFamily: FONT_SANS, fontSize: 12, lineHeight: 1.6 }} />
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+// --- BUSINESS PLAN ---------------------------------------------------------
+function BusinessPlan() {
+  const sections = [
+    { key: "exec", label: "Executive Summary" },
+    { key: "vision", label: "Visi & Misi" },
+    { key: "market", label: "Analisis Pasar" },
+    { key: "product", label: "Produk & Layanan" },
+    { key: "marketing", label: "Strategi Marketing" },
+    { key: "ops", label: "Operasional" },
+    { key: "finance", label: "Proyeksi Keuangan" },
+  ];
+  const [data, setData] = useState(() => {
+    try { return JSON.parse(localStorage.getItem("bizplan")) || {}; } catch { return {}; }
+  });
+  useEffect(() => { localStorage.setItem("bizplan", JSON.stringify(data)); }, [data]);
+  return (
+    <div>
+      <h2 style={{ fontSize: 15, fontWeight: 600, marginBottom: 4, fontFamily: FONT_MONO, letterSpacing: "0.04em", color: C.text }}>Business Plan</h2>
+      <p style={{ fontSize: 12, color: C.textMuted, fontFamily: FONT_MONO, marginBottom: 24 }}>Dokumentasi rencana bisnis terstruktur.</p>
+      {sections.map((s) => (
+        <div key={s.key} style={styles.card}>
+          <div style={styles.cardTitle}>{s.label}</div>
+          <textarea value={data[s.key] || ""} onChange={(e) => setData({ ...data, [s.key]: e.target.value })}
+            placeholder={`Tulis ${s.label.toLowerCase()} di sini...`}
+            style={{ ...styles.input, height: 120, resize: "vertical", fontFamily: FONT_SANS, fontSize: 12, lineHeight: 1.6 }} />
+        </div>
+      ))}
+
+      {/* -- Strategic Action Plan -- */}
+      <div style={styles.card}>
+        <div style={styles.cardTitle}>Action Plan - Marketing  x  Production  x  Finance</div>
+        <div style={{ display:"grid", gridTemplateColumns:"1fr 1fr 1fr", gap:14 }}>
+          {[{k:"marketing",l:"Marketing Plan"},{k:"production",l:"Production Plan"},{k:"finance",l:"Finance Plan"}].map(sec=>(
+            <div key={sec.k} style={{ border:`1px solid ${C.border}`, borderRadius:3, overflow:"hidden" }}>
+              <div style={{ background:C.surfaceAlt, padding:"8px 12px", fontSize:10, fontFamily:FONT_MONO, fontWeight:600, letterSpacing:"0.14em", textTransform:"uppercase", color:C.textSecondary, borderBottom:`1px solid ${C.border}` }}>
+                {sec.l}
+              </div>
+              <div style={{ padding:"10px 12px" }}>
+                {actionPlans[sec.k].length===0
+                  ? <div style={{ fontSize:11, color:C.textMuted, fontFamily:FONT_MONO }}>Tidak ada aksi mendesak.</div>
+                  : actionPlans[sec.k].map((p,j)=>(
+                      <div key={j} style={{ ...styles.alert(p.t), marginBottom:j<actionPlans[sec.k].length-1?8:0 }}>{p.msg}</div>
+                    ))
+                }
+              </div>
+            </div>
+          ))}
+        </div>
+      </div>      </div>
+
+    </div>
+  );
+}
+
+// --- SIZE BREAKDOWN ---------------------------------------------------------
+// Golden ratio configs
+const GOLDEN_CONFIGS = {
+  menswear: {
+    xs_xl: {
+      sizes: ["XS", "S", "M", "L", "XL"],
+      ratio: [0.5, 1, 2, 2, 1],   // normalized -> /6.5
+      label: "Menswear XS-XL (0.5:1:2:2:1)",
+      note: "Menswear dominan di M & L. XS relatif kecil, XL moderate.",
+      goldenSizes: ["M", "L"],
+    },
+    s_xl: {
+      sizes: ["S", "M", "L", "XL"],
+      ratio: [1, 2, 2, 1],
+      label: "Menswear S-XL (1:2:2:1)",
+      note: "Tanpa XS - distribusi seimbang dengan peak di M dan L.",
+      goldenSizes: ["M", "L"],
+    },
+  },
+  womenswear: {
+    xs_xl: {
+      sizes: ["XS", "S", "M", "L", "XL"],
+      ratio: [1, 2, 2, 1, 0.5],
+      label: "Womenswear XS-XL (1:2:2:1:0.5)",
+      note: "Womenswear dominan di S & M. XL relatif kecil.",
+      goldenSizes: ["S", "M"],
+    },
+    s_xl: {
+      sizes: ["S", "M", "L", "XL"],
+      ratio: [2, 2, 1, 0.5],
+      label: "Womenswear S-XL (2:2:1:0.5)",
+      note: "Tanpa XS - peak di S dan M, L dan XL lebih kecil.",
+      goldenSizes: ["S", "M"],
+    },
+  },
+};
+
+function SizeBreakdown({ skuNames }) {
+  // Read gender & size range from forecast settings
+  const brandGender = (() => {
+    try { return localStorage.getItem("forecast_gender") || "menswear"; } catch { return "menswear"; }
+  })();
+  const sizeRange = (() => {
+    try { return localStorage.getItem("forecast_size_range") || "xs_xl"; } catch { return "xs_xl"; }
+  })();
+
+  const goldenCfg = GOLDEN_CONFIGS[brandGender]?.[sizeRange] || GOLDEN_CONFIGS.menswear.xs_xl;
+  const { sizes, ratio, label: goldenLabel, note: goldenNote, goldenSizes } = goldenCfg;
+  const ratioSum = ratio.reduce((a, b) => a + b, 0);
+
+  // Per-SKU total units (linked from forecast)
+  const forecastSkusRaw = (() => {
+    try { return JSON.parse(localStorage.getItem("forecast_skus_v2")) || []; } catch { return []; }
+  })();
+
+  // Manual override per SKU total (if user wants custom total, not from forecast)
+  const [totalOverride, setTotalOverride] = useState(() => {
+    try { return JSON.parse(localStorage.getItem("size_total_override")) || {}; } catch { return {}; }
+  });
+  useEffect(() => { localStorage.setItem("size_total_override", JSON.stringify(totalOverride)); }, [totalOverride]);
+
+  // Manual size ratio override per SKU (default = golden)
+  const [ratioOverride, setRatioOverride] = useState(() => {
+    try { return JSON.parse(localStorage.getItem("size_ratio_override")) || {}; } catch { return {}; }
+  });
+  useEffect(() => { localStorage.setItem("size_ratio_override", JSON.stringify(ratioOverride)); }, [ratioOverride]);
+
+  const resetRatio = (name) => {
+    const copy = { ...ratioOverride }; delete copy[name]; setRatioOverride(copy);
+  };
+
+  const getTotal = (name) => {
+    if (totalOverride[name] != null) return totalOverride[name];
+    const fs = forecastSkusRaw.find(f => f.name === name);
+    return fs?.currentStock || 100;
+  };
+
+  const getRatio = (name) => ratioOverride[name] || ratio;
+
+  const calcBreakdown = (name) => {
+    const total = getTotal(name);
+    const r = getRatio(name);
+    const rSum = r.reduce((a, b) => a + b, 0);
+    return sizes.map((sz, i) => ({
+      sz,
+      qty: Math.round((r[i] / rSum) * total),
+      pct: rSum > 0 ? (r[i] / rSum * 100).toFixed(0) : 0,
+      isGolden: goldenSizes.includes(sz),
+    }));
+  };
+
+  const updateRatio = (name, idx, val) => {
+    const cur = getRatio(name);
+    const copy = [...cur]; copy[idx] = num(val);
+    setRatioOverride({ ...ratioOverride, [name]: copy });
+  };
+
+  return (
+    <div>
+      <h2 style={{ fontSize: 15, fontWeight: 600, marginBottom: 4, fontFamily: FONT_MONO, letterSpacing: "0.04em", color: C.text }}>Size Breakdown</h2>
+      <p style={{ fontSize: 11, color: C.textSecondary, fontFamily: FONT_MONO, marginBottom: 16, letterSpacing: "0.03em" }}>
+        Distribusi ukuran per SKU berbasis golden ratio. Kategori brand & range ukuran diatur di Demand Forecast.
+      </p>
+
+      {/* Golden Ratio Info */}
+      <div style={{ ...styles.card, borderLeft: `2px solid ${C.accent}` }}>
+        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", flexWrap: "wrap", gap: 10 }}>
+          <div>
+            <div style={{ fontSize: 13, fontWeight: "bold", color: C.accent, fontFamily: FONT_MONO, marginBottom: 4 }}>
+              {brandGender === "menswear" ? "" : ""} {goldenLabel}
+            </div>
+            <div style={{ fontSize: 12, color: C.textMuted, fontFamily: FONT_MONO, marginBottom: 8 }}>{goldenNote}</div>
+            {/* Visual ratio bar */}
+            <div style={{ display: "flex", gap: 6, alignItems: "center", flexWrap: "wrap" }}>
+              {sizes.map((sz, i) => (
+                <div key={sz} style={{ textAlign: "center" }}>
+                  <div style={{ fontSize: 10, fontFamily: FONT_MONO, color: goldenSizes.includes(sz) ? C.gold : C.textMuted, fontWeight: goldenSizes.includes(sz) ? "bold" : "normal", marginBottom: 2 }}>{sz}</div>
+                  <div style={{ width: 28, height: Math.round((ratio[i] / Math.max(...ratio)) * 40) + 8, background: goldenSizes.includes(sz) ? C.gold : C.border, borderRadius: 3, margin: "0 auto" }} />
+                  <div style={{ fontSize: 10, fontFamily: FONT_MONO, color: C.textMuted, marginTop: 2 }}>{ratio[i]}x</div>
+                </div>
+              ))}
+            </div>
+          </div>
+          <div style={{ background: C.warningLight, border: `1px solid ${C.warningDim}`, borderRadius: 3, padding: "10px 14px", maxWidth: 320 }}>
+            <div style={{ fontSize: 11, fontFamily: FONT_MONO, color: C.yellow, fontWeight: "bold", marginBottom: 4 }}>Catatan Penting</div>
+            <div style={{ fontSize: 11, fontFamily: FONT_MONO, color: C.text, lineHeight: 1.6 }}>
+              Ini adalah golden ratio umum berdasarkan pola penjualan fashion Indonesia. <strong>Setiap brand berbeda</strong> - validasi dengan data penjualan aktual kamu minimal 3 bulan. Jika size tertentu selalu habis duluan -> naikkan rasionya. Jika sering sisa -> turunkan. Override rasio per SKU tersedia di bawah.
+            </div>
+          </div>
+        </div>
       </div>
 
-      <Divider label="BCG Summary Matrix"/>
-      <div style={{display:"grid",gridTemplateColumns:"repeat(3,1fr)",gap:8}}>
-        {summary.filter(s=>s.count>0).map(s=>{
-          const qc = BCG_COLORS[s.q]||C.mid;
+      {/* Per-SKU breakdown */}
+      {skuNames.map((name, si) => {
+        const breakdown = calcBreakdown(name);
+        const total = getTotal(name);
+        const isOverrideRatio = !!ratioOverride[name];
+        const isOverrideTotal = totalOverride[name] != null;
+        const fs = forecastSkusRaw.find(f => f.name === name);
+
+        return (
+          <div key={name} style={{ ...styles.card, marginBottom: 14 }}>
+            {/* SKU header */}
+            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 14, flexWrap: "wrap", gap: 8 }}>
+              <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+                <span style={{ fontSize: 14, fontWeight: "bold" }}>{name}</span>
+                {fs && <span style={{ fontSize: 11, fontFamily: FONT_MONO, color: C.textMuted }}>{getCategoryConfig(fs.category || "potential").label}</span>}
+                {isOverrideRatio && <span style={{ fontSize: 10, fontFamily: FONT_MONO, color: C.accent, border: `1px solid ${C.gold}`, borderRadius: 3, padding: "1px 6px" }}>rasio custom</span>}
+              </div>
+              <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
+                <div>
+                  <label style={{ ...styles.label, marginBottom: 2 }}>Total Unit</label>
+                  <input type="number" value={total}
+                    onChange={e => setTotalOverride({ ...totalOverride, [name]: num(e.target.value) })}
+                    style={{ ...styles.input, width: 90 }}
+                    title={isOverrideTotal ? "Manual override" : "Dari stok Forecast"} />
+                </div>
+                {isOverrideRatio && (
+                  <button style={{ ...styles.btnSm, marginTop: 16 }} onClick={() => resetRatio(name)}>Reset Rasio</button>
+                )}
+              </div>
+            </div>
+
+            {/* Visual bar breakdown */}
+            <div style={{ display: "flex", gap: 8, marginBottom: 12, flexWrap: "wrap" }}>
+              {breakdown.map(({ sz, qty, pct: p, isGolden }) => (
+                <div key={sz} style={{ flex: 1, minWidth: 60, textAlign: "center" }}>
+                  <div style={{ height: 60, display: "flex", alignItems: "flex-end", justifyContent: "center" }}>
+                    <div style={{ width: "80%", height: Math.max(8, (num(p) / 100) * 60) + "px", background: isGolden ? C.gold : C.border, borderRadius: "3px 3px 0 0", transition: "height 0.3s" }} />
+                  </div>
+                  <div style={{ fontSize: 12, fontWeight: "bold", fontFamily: FONT_MONO, color: isGolden ? C.gold : C.text, marginTop: 4 }}>{sz}</div>
+                  <div style={{ fontSize: 13, fontWeight: "bold", fontFamily: FONT_MONO }}>{qty}</div>
+                  <div style={{ fontSize: 10, fontFamily: FONT_MONO, color: C.textMuted }}>{p}%</div>
+                </div>
+              ))}
+            </div>
+
+            {/* Ratio override inputs */}
+            <div style={{ borderTop: `1px solid ${C.border}`, paddingTop: 10 }}>
+              <div style={{ fontSize: 10, fontFamily: FONT_MONO, color: C.textMuted, marginBottom: 6 }}>
+                Kustomisasi rasio (opsional) - berdasarkan data penjualan aktual brand kamu:
+              </div>
+              <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+                {sizes.map((sz, idx) => {
+                  const r = getRatio(name);
+                  return (
+                    <div key={sz} style={{ textAlign: "center" }}>
+                      <label style={{ ...styles.label, color: goldenSizes.includes(sz) ? C.gold : C.textMuted }}>{sz}</label>
+                      <input type="number" value={r[idx]} step={0.5} min={0}
+                        onChange={e => updateRatio(name, idx, e.target.value)}
+                        style={{ ...styles.input, width: 58, textAlign: "center" }} />
+                    </div>
+                  );
+                })}
+              </div>
+            </div>
+          </div>
+        );
+      })}
+    </div>
+  );
+}
+
+// --- BCG MATRIX -------------------------------------------------------------
+function BCGMatrix({ skuNames }) {
+  const [thresholds, setThresholds] = useState(() => {
+    try { return JSON.parse(localStorage.getItem("bcg_thresh")) || { deadstock: 90, slowmove: 45, bestDIO: 20, revShare: 15 }; }
+    catch { return { deadstock: 90, slowmove: 45, bestDIO: 20, revShare: 15 }; }
+  });
+  useEffect(() => { localStorage.setItem("bcg_thresh", JSON.stringify(thresholds)); }, [thresholds]);
+
+  // -- Baca dari Forecast v2 -------------------------------------
+  const forecastSkusRaw = (() => {
+    try { return JSON.parse(localStorage.getItem("forecast_skus_v2")) || []; } catch { return []; }
+  })();
+  const forecastMonth = (() => {
+    try { return parseInt(localStorage.getItem("forecast_month") || new Date().getMonth()); } catch { return new Date().getMonth(); }
+  })();
+
+  // Override revenue/bln per-SKU (manual edit jika perlu)
+  const [revenueOverride, setRevenueOverride] = useState(() => {
+    try { return JSON.parse(localStorage.getItem("bcg_rev_override")) || {}; } catch { return {}; }
+  });
+  useEffect(() => { localStorage.setItem("bcg_rev_override", JSON.stringify(revenueOverride)); }, [revenueOverride]);
+
+  // Build merged rows: dari forecast + override revenue
+  const rows = skuNames.map(name => {
+    const fs = forecastSkusRaw.find(f => f.name === name);
+    const hist = fs?.hist || [0,0,0];
+    const filledHist = hist.filter(v => v > 0);
+    const avgSales = fs?.histOverride ? fs.avgSales : (filledHist.length > 0 ? filledHist.reduce((a,b)=>a+b,0)/filledHist.length : fs?.avgSales || 0);
+    const seasonMult = SEASONS[forecastMonth]?.mult || 1;
+    const adjustedSales = avgSales * seasonMult;
+    const currentStock = fs?.currentStock || 0;
+    const price = fs?.price || 0;
+    // Revenue/bln = avg sales bulan terakhir × harga (pakai hist bulan terakhir jika ada)
+    const lastMonthSales = hist[2] > 0 ? hist[2] : avgSales;
+    const defaultRevenue = lastMonthSales * price;
+    const revenue = revenueOverride[name] != null ? revenueOverride[name] : defaultRevenue;
+    const cat = fs ? getCategoryConfig(fs.category || "potential") : getCategoryConfig("potential");
+    // Trend
+    const trend = (hist[0]>0 && hist[2]>0) ? ((hist[2]-hist[0])/hist[0]*100) : 0;
+    return { name, currentStock, adjustedSales, lastMonthSales, avgSales, revenue, price, cat, hist, trend };
+  });
+
+  const classify = (row) => {
+    const dio = row.adjustedSales > 0 ? (row.currentStock / (row.adjustedSales / 30)) : 999;
+    const totalRev = rows.reduce((s, r) => s + r.revenue, 0);
+    const revSharePct = totalRev > 0 ? (row.revenue / totalRev) * 100 : 0;
+    if (dio >= thresholds.deadstock) return { label: "Deadstock", color: C.negative };
+    if (dio >= thresholds.slowmove) return { label: "Slow Mover", color: C.warning };
+    if (dio <= thresholds.bestDIO && revSharePct >= thresholds.revShare) return { label: "Star", color: C.accent };
+    if (dio <= thresholds.bestDIO) return { label: "Cash Cow", color: C.positive };
+    return { label: "Question Mark", color: C.textSecondary };
+  };
+
+  const noForecastData = forecastSkusRaw.length === 0;
+  const prevMonthName = MONTHS_ALL[(forecastMonth - 1 + 12) % 12];
+  const totalRev = rows.reduce((s, r) => s + r.revenue, 0);
+
+  return (
+    <div>
+      <h2 style={{ fontSize: 15, fontWeight: 600, marginBottom: 4, fontFamily: FONT_MONO, letterSpacing: "0.04em", color: C.text }}>BCG Matrix - Inventori</h2>
+      <p style={{ fontSize: 11, color: C.textSecondary, fontFamily: FONT_MONO, marginBottom: 16, letterSpacing: "0.03em" }}>
+        Klasifikasi SKU berdasarkan Days in Inventory & kontribusi revenue. Data stok & sales otomatis dari Demand Forecast.
+      </p>
+
+      {noForecastData && (
+        <div style={styles.alert("yellow")}>Belum ada data di Demand Forecast. Isi modul Demand Forecast terlebih dahulu - data stok & sales akan otomatis muncul di sini.</div>
+      )}
+
+      {/* Threshold settings */}
+      <div style={styles.card}>
+        <div style={styles.cardTitle}>Threshold Klasifikasi</div>
+        <div style={{ display: "grid", gridTemplateColumns: "repeat(4, 1fr)", gap: 12 }}>
+          {[
+            { f: "deadstock", l: "Deadstock (DIO hari >=)" },
+            { f: "slowmove",  l: "Slow Move (DIO hari >=)" },
+            { f: "bestDIO",   l: "Best DIO (hari <=)" },
+            { f: "revShare",  l: "Star Rev Share (% >=)" },
+          ].map(({ f, l }) => (
+            <div key={f}>
+              <label style={styles.label}>{l}</label>
+              <input type="number" value={thresholds[f]}
+                onChange={e => setThresholds({ ...thresholds, [f]: num(e.target.value) })}
+                style={styles.input} />
+            </div>
+          ))}
+        </div>
+      </div>
+
+      {/* Main table */}
+      <div style={styles.card}>
+        <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 12 }}>
+          <div style={styles.cardTitle}>Hasil BCG</div>
+          <span style={{ fontSize: 10, fontFamily: FONT_MONO, color: C.textMuted, marginTop: -14 }}>
+            Sales/Bln = avg historis × seasonality | Revenue/Bln = penjualan {prevMonthName} × harga
+          </span>
+        </div>
+        <div style={{ overflowX: "auto" }}>
+          <table style={styles.table}>
+            <thead>
+              <tr>
+                {[
+                  "SKU", "Kategori Forecast", "Stok Saat Ini",
+                  `Sales ${prevMonthName}`, "Avg Sales/Bln", "Adj Sales/Bln",
+                  "Revenue/Bln", "DIO (hari)", "Rev Share", "Trend 3 Bln", "Klasifikasi BCG"
+                ].map(h => <th key={h} style={styles.th}>{h}</th>)}
+              </tr>
+            </thead>
+            <tbody>
+              {rows.map((row, i) => {
+                const cat = classify(row);
+                const dio = row.adjustedSales > 0 ? (row.currentStock / (row.adjustedSales / 30)).toFixed(0) : "inf";
+                const revShare = totalRev > 0 ? ((row.revenue / totalRev) * 100).toFixed(1) : "0";
+                const trendColor = row.trend > 10 ? C.green : row.trend < -10 ? C.red : C.textMuted;
+                return (
+                  <tr key={i} style={{ borderLeft: `2px solid ${row.cat.color}` }}>
+                    <td style={{ ...styles.td, fontWeight: "bold" }}>{row.name}</td>
+                    <td style={{ ...styles.td, color: row.cat.color, fontSize: 11 }}>{row.cat.label}</td>
+                    <td style={styles.td}>{row.currentStock}</td>
+                    <td style={{ ...styles.td, fontWeight: "bold", color: C.accent }}>{Math.round(row.lastMonthSales)}</td>
+                    <td style={styles.td}>{Math.round(row.avgSales)}</td>
+                    <td style={styles.td}>{Math.round(row.adjustedSales)}</td>
+                    <td style={styles.td}>
+                      <div style={{ display: "flex", alignItems: "center", gap: 4 }}>
+                        <span>{fmt(row.revenue)}</span>
+                        {revenueOverride[row.name] != null && (
+                          <span style={{ fontSize: 9, color: C.accent, fontFamily: FONT_MONO }}>manual</span>
+                        )}
+                        <input type="number" value={row.revenue}
+                          onChange={e => setRevenueOverride({ ...revenueOverride, [row.name]: num(e.target.value) })}
+                          style={{ ...styles.input, width: 100, fontSize: 10 }}
+                          title="Edit jika perlu override" />
+                      </div>
+                    </td>
+                    <td style={{ ...styles.td, fontWeight: "bold", color: num(dio) >= thresholds.deadstock ? C.negative : num(dio) >= thresholds.slowmove ? C.warning : C.positive }}>
+                      {dio} hr
+                    </td>
+                    <td style={styles.td}>{revShare}%</td>
+                    <td style={{ ...styles.td, color: trendColor, fontWeight: "bold" }}>
+                      {row.trend !== 0 ? (row.trend > 0 ? "▲" : "▼") + Math.abs(row.trend).toFixed(0) + "%" : "-"}
+                    </td>
+                    <td style={{ ...styles.td, color: cat.color, fontWeight: "bold" }}>{cat.label}</td>
+                  </tr>
+                );
+              })}
+            </tbody>
+          </table>
+        </div>
+        <div style={{ marginTop: 8, fontSize: 10, color: C.textMuted, fontFamily: FONT_MONO }}>
+          * Revenue/Bln default = penjualan bulan terakhir × harga dari Forecast. Bisa di-override manual per SKU jika aktual berbeda.
+        </div>
+      </div>
+
+      {/* -- Diagnosa & Saran Per SKU -- */}
+      <div style={styles.card}>
+        <div style={styles.cardTitle}>Diagnosa & Saran Strategis - Per SKU</div>
+        {rows.map((row, i) => {
+          const bcg = classify(row);
+          const dio = row.adjustedSales > 0 ? row.currentStock / (row.adjustedSales / 30) : 999;
+          const revShare = totalRev > 0 ? (row.revenue / totalRev) * 100 : 0;
+          const trendDown = row.trend < -10;
+          const trendUp   = row.trend > 10;
+          const trendFlat = !trendDown && !trendUp;
+
+          // -- Saran berdasarkan kombinasi BCG + trend + kategori forecast --
+          const sarans = [];
+
+          if (bcg.label.includes("Star")) {
+            sarans.push({ type: "green", icon: "", title: "Star - Maksimalkan & Jaga",
+              body: "Ini produk terbaik kamu sekarang. Pastikan lini produksi stabil dan stok tidak pernah kosong. Agresifkan paid ads - ROAS di channel ini harus dimonitor ketat agar tidak drop saat scaling. Optimalkan juga organic: konten review, foto lifestyle, dan SEO toko." });
+            if (trendDown) sarans.push({ type: "yellow", icon: "", title: "Star tapi tren turun",
+              body: `Penjualan turun ${Math.abs(row.trend).toFixed(0)}% dalam 3 bulan. Star yang trendnya turun bisa jatuh ke Cash Cow atau bahkan Question Mark. Evaluasi: apakah ada kompetitor baru, perubahan harga, atau fatigue iklan? Lakukan refresh kreatif dan cek harga kompetitor sebelum terlambat.` });
+            if (revShare > 40) sarans.push({ type: "yellow", icon: "", title: "Konsentrasi revenue terlalu tinggi",
+              body: `${row.name} menyumbang ${revShare.toFixed(0)}% total revenue. Terlalu bergantung pada satu SKU adalah risiko - jika tiba-tiba drop, cashflow terganggu. Mulai develop SKU lain sebagai backup revenue.` });
+          }
+
+          if (bcg.label.includes("Cash Cow")) {
+            sarans.push({ type: "green", icon: "", title: "Cash Cow - Jaga Flow, Jangan Over-Invest",
+              body: "DIO bagus, tapi revenue share belum cukup besar untuk jadi Star. Jaga konsistensi stok dan optimalkan organic - foto, ulasan, dan SEO toko. Paid ads boleh tapi efisiensi dulu sebelum scale. Gunakan cashflow dari produk ini untuk fund pengembangan SKU berpotensi." });
+            if (trendDown) sarans.push({ type: "yellow", icon: "", title: "Cash Cow tren turun - mulai geser prioritas",
+              body: `Penjualan turun ${Math.abs(row.trend).toFixed(0)}% - Cash Cow yang trendnya terus turun akan jadi Question Mark. Evaluasi apakah worth dipertahankan atau mulai geser alokasi iklan dan stok ke SKU yang sedang naik.` });
+          }
+
+          if (bcg.label.includes("Question Mark")) {
+            if (trendUp) {
+              sarans.push({ type: "green", icon: "", title: "Question Mark tapi tren naik - kandidat Star",
+                body: `Penjualan naik ${row.trend.toFixed(0)}% dalam 3 bulan. Ini sinyal valid untuk mulai naikkan investasi. Tambah buffer stok, uji scale iklan 20-30%, dan pantau ROAS ketat. Jika tren bertahan 2 bulan ke depan, shift kategori ke Potential atau Best Seller.` });
+            } else if (trendDown) {
+              sarans.push({ type: "red", icon: "", title: "Question Mark + tren turun - evaluasi exit",
+                body: `Penjualan turun ${Math.abs(row.trend).toFixed(0)}% dan kontribusi revenue rendah. Jangan tambah stok. Tahan iklan kecuali ada perubahan signifikan (harga, foto, bundling). Jika tidak ada perbaikan dalam 30 hari, pertimbangkan clearance dan realokasi modal ke SKU yang lebih proven.` });
+            } else {
+              sarans.push({ type: "yellow", icon: "", title: "Question Mark - butuh validasi lebih",
+                body: "Penjualan flat dan kontribusi revenue belum signifikan. Lakukan satu iterasi tajam: test foto baru, turunkan harga 5-10%, atau coba flash voucher selama 7 hari. Ukur hasilnya - naik berarti ada potensi, flat/turun berarti pertimbangkan exit." });
+            }
+          }
+
+          if (bcg.label.includes("Slow Mover")) {
+            sarans.push({ type: "yellow", icon: "", title: "Slow Mover - Hati-hati DIO Tinggi",
+              body: `DIO ${dio.toFixed(0)} hari - stok bergerak lambat, modal tertahan. Sebelum restock, coba dorong penjualan dulu: voucher toko, bundle dengan Best Seller, atau flash sale 3 hari. Jika setelah intervensi tidak ada pergerakan signifikan, kurangi stok ke level minimum dan hold restock.` });
+            if (trendDown) sarans.push({ type: "red", icon: "", title: "Slow Mover + tren turun - risiko deadstock",
+              body: `Kombinasi berbahaya: DIO tinggi + penjualan turun ${Math.abs(row.trend).toFixed(0)}%. Tanpa aksi agresif, ini akan jadi deadstock dalam waktu dekat. Prioritaskan clearance sekarang - diskon, bundle, atau tawarkan ke reseller dengan margin lebih rendah daripada modal tertahan.` });
+          }
+
+          if (bcg.label.includes("Deadstock")) {
+            sarans.push({ type: "red", icon: "", title: "Deadstock - Prioritas Habiskan Modal",
+              body: `DIO ${dio.toFixed(0)} hari - modal nyangkut dan tidak berputar. Hentikan semua restock. Fokus 100% habiskan stok existing: flash sale agresif, bundle wajib dengan SKU lain, atau tawarkan ke wholesaler/reseller dengan harga di atas COGS. Setiap hari yang lewat = biaya opportunity cost yang tidak perlu.` });
+            if (revShare > 15) sarans.push({ type: "red", icon: "", title: "Deadstock menyumbang revenue besar - hati-hati",
+              body: `${row.name} masih contribute ${revShare.toFixed(0)}% revenue meski DIO tinggi - ini berarti penjualannya masih ada tapi stok terlalu besar. Turunkan stok ke level yang sehat (DIO < 45 hari) dan jangan restock sampai rasio ini normal.` });
+          }
+
+          // Saran lintas SKU - jika Star ada dan ini underperform
+          const starExists = rows.some(r => classify(r).label.includes("Star") && r.name !== row.name);
+          if (starExists && (bcg.label.includes("Question Mark") || bcg.label.includes("Slow Mover") || bcg.label.includes("Deadstock"))) {
+            sarans.push({ type: "gold", icon: "", title: "Saran realokasi resource",
+              body: `Ada SKU lain yang sedang di posisi Star/terbaik. Pertimbangkan geser sebagian budget iklan dan alokasi stok dari ${row.name} ke SKU yang lebih proven - modal yang berputar lebih cepat menghasilkan cashflow lebih sehat.` });
+          }
+
+          const headerBg = bcg.label.includes("Star") ? C.accentLight
+            : bcg.label.includes("Cash Cow") ? C.positiveLight
+            : bcg.label.includes("Deadstock") || (bcg.label.includes("Question Mark") && trendDown) ? C.negativeLight
+            : C.warningLight;
+          const headerBorder = bcg.label.includes("Star") ? C.accentDim
+            : bcg.label.includes("Cash Cow") ? C.positiveDim
+            : bcg.label.includes("Deadstock") || (bcg.label.includes("Question Mark") && trendDown) ? C.negativeDim
+            : C.warningDim;
+
           return (
-            <div key={s.q} style={{background:C.s1,border:`1px solid ${qc}30`,borderLeft:`3px solid ${qc}`,borderRadius:2,padding:14}}>
-              <div style={{fontSize:14,marginBottom:6}}>{s.q.split(" ")[0]}</div>
-              <div style={{fontSize:12,color:qc,fontFamily:"'DM Mono',monospace",fontWeight:700,marginBottom:4}}>{s.q.substring(2)}</div>
-              <div style={{fontSize:11,color:C.mid,fontFamily:"'DM Mono',monospace",marginBottom:2}}>{s.count} SKU · {IDR(s.rev)}</div>
-              <div style={{fontSize:10,color:C.dim,fontFamily:"'DM Mono',monospace",marginBottom:8}}>Avg DIO: {s.avgDio.toFixed(0)} hari</div>
-              <div style={{fontSize:10,color:C.mid,fontFamily:"'DM Mono',monospace",fontStyle:"italic",lineHeight:1.5}}>{actions[s.q]}</div>
+            <div key={i} style={{ marginBottom: 14, border: `1px solid ${headerBorder}30`, borderRadius: 3, overflow: "hidden" }}>
+              {/* Header */}
+              <div style={{ background: headerBg, borderBottom: `1px solid ${headerBorder}30`, padding: "10px 16px", display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap" }}>
+                <span style={{ fontSize: 14, fontWeight: "bold", color: C.text }}>{row.name}</span>
+                <span style={{ fontSize: 12, fontWeight: "bold", color: bcg.color, fontFamily: FONT_MONO }}>{bcg.label}</span>
+                <span style={{ fontSize: 11, fontFamily: FONT_MONO, color: row.cat.color }}>({row.cat.label})</span>
+                <span style={{ fontSize: 11, fontFamily: FONT_MONO, color: C.textMuted, marginLeft: "auto" }}>
+                  DIO {dio.toFixed(0)} hr  x  Rev share {revShare.toFixed(1)}%
+                  {row.trend !== 0 && (
+                    <span style={{ color: trendDown ? C.red : C.green, marginLeft: 8 }}>
+                      {trendDown ? "▼" : "▲"}{Math.abs(row.trend).toFixed(0)}% trend
+                    </span>
+                  )}
+                </span>
+              </div>
+              {/* Saran items */}
+              <div style={{ padding: "10px 14px" }}>
+                {sarans.map((s, j) => (
+                  <div key={j} style={{ marginBottom: j < sarans.length - 1 ? 8 : 0, padding: "10px 14px", borderRadius: 5,
+                    background: s.type === "red" ? C.redLight : s.type === "yellow" ? C.yellowLight : s.type === "green" ? C.greenLight : C.goldLight,
+                    border: `1px solid ${s.type === "red" ? C.red : s.type === "yellow" ? C.yellow : s.type === "green" ? C.green : C.gold}40` }}>
+                    <div style={{ fontSize: 12, fontWeight: "bold", fontFamily: FONT_MONO,
+                      color: s.type === "red" ? C.red : s.type === "yellow" ? C.yellow : s.type === "green" ? C.green : C.gold,
+                      marginBottom: 4 }}>
+                      {s.icon} {s.title}
+                    </div>
+                    <div style={{ fontSize: 12, fontFamily: FONT_MONO, color: C.text, lineHeight: 1.65 }}>
+                      {s.body}
+                    </div>
+                  </div>
+                ))}
+              </div>
             </div>
           );
         })}
@@ -531,575 +1814,647 @@ function BCGModule() {
   );
 }
 
-// ─── MODULE 5: AD PERFORMANCE ─────────────────────────────────────────────────
-function AdPerfModule() {
-  const [thresholds, setThresholds] = useLocalState("adperf_thresholds", {ctr:2,cvr:3,atc:8,roas:3,cpc:2500});
-  const [adData, setAdData] = useLocalState("adperf_data", {});
+// --- SHOPEE ADS PERFORMANCE --------------------------------------------------
+function AdPerformance({ skuNames }) {
+  const [thresh, setThresh] = useState(() => {
+    try { return JSON.parse(localStorage.getItem("adperf_thresh")) || { ctr: 2, cvr: 3, atc: 8, roas: 3, cpc: 2500 }; } catch { return { ctr: 2, cvr: 3, atc: 8, roas: 3, cpc: 2500 }; }
+  });
+  const defaultSkus = () => skuNames.map((name) => ({ name, impr: 10000, clicks: 300, atc: 80, orders: 15, revenue: 2250000, spend: 450000, dailyBudget: 50000 }));
+  const [skus, setSkus] = useState(() => {
+    try { return JSON.parse(localStorage.getItem("adperf_skus")) || defaultSkus(); } catch { return defaultSkus(); }
+  });
+  useEffect(() => {
+    const updated = skuNames.map((name, i) => skus[i] ? { ...skus[i], name } : { name, impr: 10000, clicks: 300, atc: 80, orders: 15, revenue: 2250000, spend: 450000, dailyBudget: 50000 });
+    setSkus(updated);
+  }, [skuNames]);
+  useEffect(() => { localStorage.setItem("adperf_skus", JSON.stringify(skus)); }, [skus]);
+  useEffect(() => { localStorage.setItem("adperf_thresh", JSON.stringify(thresh)); }, [thresh]);
 
-  // Auto-pull SKU names from Forecast
-  const forecastNames = (() => {
-    try {
-      const stored = localStorage.getItem("brandos_forecast_skus");
-      const fSkus = stored ? JSON.parse(stored) : [];
-      return fSkus.filter(sk=>sk.name).map(sk=>sk.name);
-    } catch { return []; }
+  const update = (i, f, v) => { const c = [...skus]; c[i] = { ...c[i], [f]: num(v) }; setSkus(c); };
+  const updateThresh = (f, v) => setThresh({ ...thresh, [f]: num(v) });
+
+  // Baca data forecast dari localStorage
+  const forecastSkus = (() => {
+    try { return JSON.parse(localStorage.getItem("forecast_skus")) || []; } catch { return []; }
   })();
-  const emptySku = () => ({spend:"",impresi:"",klik:"",atc:"",checkout:"",revenue:""});
-  const adAllNames = [...new Set([...forecastNames, ...Object.keys(adData)])].filter(Boolean);
-  const skus = adAllNames.length > 0
-    ? adAllNames.map(name => ({name, ...(adData[name]||emptySku())}))
-    : Array(6).fill(null).map((_,i) => ({name:`SKU ${i+1}`, ...emptySku()}));
-  const updSku = (i,k,v) => {
-    const name = skus[i].name;
-    if(k==="name") {
-      const oldData = adData[skus[i].name]||emptySku();
-      setAdData(d=>{const n={...d}; delete n[skus[i].name]; n[v]=oldData; return n;});
+  const forecastMonth = (() => {
+    try { return parseInt(localStorage.getItem("forecast_month") || "0"); } catch { return 0; }
+  })();
+
+  const getForecastContext = (skuName) => {
+    const fs = forecastSkus.find(f => f.name === skuName);
+    if (!fs) return null;
+    const seasonMult = SEASONS[forecastMonth]?.mult || 1;
+    const adjustedSales = fs.avgSales * seasonMult;
+    const safetyStock = adjustedSales * 0.15;
+    const reorderPoint = (adjustedSales / 30) * fs.leadDays + safetyStock;
+    const excessStock = fs.currentStock - (adjustedSales * 1.4);
+    const daysOfStock = fs.currentStock / (adjustedSales / 30);
+
+    if (fs.currentStock <= safetyStock) return { status: "critical", daysOfStock, currentStock: fs.currentStock, reorderPoint, excessStock, adjustedSales, minOrder: fs.minOrder };
+    if (fs.currentStock <= reorderPoint) return { status: "low", daysOfStock, currentStock: fs.currentStock, reorderPoint, excessStock, adjustedSales, minOrder: fs.minOrder };
+    if (excessStock > adjustedSales * 2) return { status: "overstock", daysOfStock, currentStock: fs.currentStock, reorderPoint, excessStock, adjustedSales, minOrder: fs.minOrder };
+    if (daysOfStock > 90) return { status: "deadstock_risk", daysOfStock, currentStock: fs.currentStock, reorderPoint, excessStock, adjustedSales, minOrder: fs.minOrder };
+    return { status: "ok", daysOfStock, currentStock: fs.currentStock, reorderPoint, excessStock, adjustedSales, minOrder: fs.minOrder };
+  };
+
+  const calc = (s) => {
+    const ctr = s.impr > 0 ? (s.clicks / s.impr) * 100 : 0;
+    const cvr = s.clicks > 0 ? (s.orders / s.clicks) * 100 : 0;
+    const atcR = s.clicks > 0 ? (s.atc / s.clicks) * 100 : 0;
+    const roas = s.spend > 0 ? s.revenue / s.spend : 0;
+    const cpc = s.clicks > 0 ? s.spend / s.clicks : 0;
+    const cpa = s.orders > 0 ? s.spend / s.orders : 0;
+    return { ctr, cvr, atcR, roas, cpc, cpa };
+  };
+
+  // Generate saran per SKU berdasarkan performa ads + konteks forecast
+  const getSaran = (sku, c, fc) => {
+    const sarads = []; // saran ads murni
+    const sarstock = []; // saran berbasis stok
+
+    // -- Saran berbasis performa iklan -----------------------------
+    if (c.ctr < thresh.ctr * 0.5) sarads.push({ type: "red", text: "CTR sangat rendah (" + c.ctr.toFixed(2) + "%) - ganti foto utama, pakai foto lifestyle bukan catalog. Prioritas perbaiki sebelum naikkan budget." });
+    else if (c.ctr < thresh.ctr) sarads.push({ type: "yellow", text: "CTR di bawah target (" + c.ctr.toFixed(2) + "%) - coba A/B test thumbnail berbeda. Tambahkan label promo atau badge." });
+
+    if (c.atcR < thresh.atc) sarads.push({ type: "yellow", text: "ATC rate rendah (" + c.atcR.toFixed(1) + "%) - harga kurang kompetitif atau deskripsi produk tidak meyakinkan. Cek harga competitor & tambah voucher toko." });
+
+    if (c.cvr < thresh.cvr && c.ctr >= thresh.ctr) sarads.push({ type: "yellow", text: "Traffic masuk tapi tidak convert (CVR " + c.cvr.toFixed(2) + "%) - optimasi halaman produk: foto lebih lengkap, review, dan fast response." });
+
+    if (c.roas >= thresh.roas * 1.5) sarads.push({ type: "green", text: "ROAS excellent (" + c.roas.toFixed(2) + "x) - iklan ini profitable. Pertimbangkan naikkan budget harian 20-30%." });
+    else if (c.roas >= thresh.roas) sarads.push({ type: "green", text: "ROAS on-target (" + c.roas.toFixed(2) + "x) - maintain budget, monitor 3 hari ke depan sebelum keputusan scale." });
+    else if (c.roas < thresh.roas && c.roas >= 1.5) sarads.push({ type: "yellow", text: "ROAS di bawah target (" + c.roas.toFixed(2) + "x) - evaluasi keyword & bid. Turunkan budget 20% sampai ROAS recover." });
+    else if (c.roas < 1.5) sarads.push({ type: "red", text: "ROAS berbahaya (" + c.roas.toFixed(2) + "x) - iklan rugi. Pause atau potong budget minimum sampai ada perbaikan kreatif/harga." });
+
+    if (c.cpc > thresh.cpc) sarads.push({ type: "yellow", text: "CPC mahal (" + fmt(c.cpc) + ") - keyword terlalu kompetitif. Coba exact match keyword atau long-tail keyword yang lebih spesifik." });
+
+    // -- Saran berbasis konteks stok forecast ---------------------
+    if (fc) {
+      const suggestedBudget = Math.round(sku.dailyBudget / 1000) * 1000;
+
+      if (fc.status === "overstock" || fc.status === "deadstock_risk") {
+        const kelebihanUnit = Math.round(fc.excessStock);
+        const hariHabis = Math.round(fc.daysOfStock);
+        sarstock.push({
+          type: "yellow",
+          icon: "-",
+          text: `Stok berlebih ${kelebihanUnit > 0 ? kelebihanUnit + " unit" : ""} - estimasi habis dalam ${hariHabis} hari tanpa aksi.`,
+          action: `Naikkan ROAS target sementara menjadi ${(thresh.roas * 0.8).toFixed(1)}x (lebih longgar) untuk mempercepat penjualan. Tambah budget harian dari ${fmt(sku.dailyBudget)} -> ${fmt(Math.round(sku.dailyBudget * 1.3 / 1000) * 1000)}. Aktifkan voucher flash sale atau bundling.`,
+        });
+      }
+
+      if (fc.status === "critical") {
+        sarstock.push({
+          type: "red",
+          icon: "",
+          text: `Stok KRITIS - hanya ${fc.currentStock} unit tersisa (${fc.daysOfStock.toFixed(0)} hari).`,
+          action: `TAHAN atau PAUSE iklan sekarang. Budget harian saat ini ${fmt(sku.dailyBudget)} terbuang sia-sia jika stok habis di tengah campaign. Aktifkan kembali hanya setelah restock masuk.`,
+        });
+      }
+
+      if (fc.status === "low") {
+        const hariHabis = Math.round(fc.daysOfStock);
+        sarstock.push({
+          type: "yellow",
+          icon: "",
+          text: `Stok menipis - estimasi habis ${hariHabis} hari lagi (${fc.currentStock} unit).`,
+          action: `Kurangi budget harian dari ${fmt(sku.dailyBudget)} -> ${fmt(Math.round(sku.dailyBudget * 0.6 / 1000) * 1000)} untuk memperlambat penjualan sambil menunggu restock. Jangan pause total agar ranking produk tidak turun.`,
+        });
+      }
+
+      if (fc.status === "ok" && c.roas >= thresh.roas) {
+        sarstock.push({
+          type: "green",
+          icon: "",
+          text: `Stok aman (${fc.daysOfStock.toFixed(0)} hari) + ROAS on-target.`,
+          action: `Kondisi ideal untuk scale. Naikkan budget harian ${fmt(sku.dailyBudget)} -> ${fmt(Math.round(sku.dailyBudget * 1.2 / 1000) * 1000)} secara bertahap. Monitor 3 hari, jika ROAS stabil naikkan lagi 20%.`,
+        });
+      }
     } else {
-      setAdData(d=>({...d,[name]:{...(d[name]||emptySku()),[k]:v}}));
+      // Tidak ada data forecast - saran generik berbasis ROAS + budget
+      if (c.roas >= thresh.roas) {
+        sarstock.push({ type: "green", icon: "", text: "Performa iklan bagus.", action: `Pertimbangkan scale budget harian dari ${fmt(sku.dailyBudget)} -> ${fmt(Math.round(sku.dailyBudget * 1.2 / 1000) * 1000)}. Hubungkan data Forecast untuk saran berbasis stok.` });
+      } else {
+        sarstock.push({ type: "yellow", icon: "", text: "Belum ada data forecast untuk SKU ini.", action: "Isi modul Demand Forecast dengan nama SKU yang sama untuk mendapat saran berbasis kondisi stok." });
+      }
     }
+
+    return { sarads, sarstock };
   };
 
-  const calc = skus.map(sk => {
-    const spend=f(sk.spend)||0, imp=f(sk.impresi)||0, klik=f(sk.klik)||0;
-    const atc=f(sk.atc)||0, checkout=f(sk.checkout)||0, rev=f(sk.revenue)||0;
-    const ctr = klik>0&&imp>0?klik/imp*100:0;
-    const cvr = klik>0&&checkout>0?checkout/klik*100:0;
-    const atcRate = klik>0&&atc>0?atc/klik*100:0;
-    const roas = spend>0?rev/spend:0;
-    const cpc = klik>0&&spend>0?spend/klik:0;
-    let diag = "—";
-    if (spend>0) {
-      if (roas < thresholds.roas) diag = "⚠ ROAS Rendah — Kurangi Spend";
-      else if (ctr < thresholds.ctr) diag = "📉 CTR Rendah — Ganti Creative";
-      else if (atcRate > thresholds.atc && cvr < thresholds.cvr) diag = "🛒 ATC Tinggi CVR Rendah — Cek Harga";
-      else if (cvr < thresholds.cvr) diag = "📉 CVR Rendah — Optimasi Halaman";
-      else if (atcRate < thresholds.atc) diag = "👁 Traffic OK, ATC Rendah — Perkuat Value Prop";
-      else diag = "✓ Performa Baik";
+    // -- Aggregate overall totals ----------------------------------
+  const totalSpend    = skus.reduce((s,sku) => s + sku.spend, 0);
+  const totalRevenue  = skus.reduce((s,sku) => s + sku.revenue, 0);
+  const totalOrders   = skus.reduce((s,sku) => s + sku.orders, 0);
+  const totalClicks   = skus.reduce((s,sku) => s + sku.clicks, 0);
+  const totalImpr     = skus.reduce((s,sku) => s + sku.impr, 0);
+  const blendedROAS   = totalSpend>0 ? totalRevenue/totalSpend : 0;
+  const blendedCTR    = totalImpr>0 ? (totalClicks/totalImpr)*100 : 0;
+  const blendedCVR    = totalClicks>0 ? (totalOrders/totalClicks)*100 : 0;
+  const blendedCPA    = totalOrders>0 ? totalSpend/totalOrders : 0;
+
+  // Budget reallocation suggestion
+  const budgetReallocSuggestion = (() => {
+    const calcR = s => s.spend>0?s.revenue/s.spend:0;
+    const sorted = [...skus].filter(s=>s.spend>0);
+    if (sorted.length < 2) return null;
+    const best = sorted.sort((a,b)=>calcR(b)-calcR(a))[0];
+    const worst = [...skus].filter(s=>s.spend>0).sort((a,b)=>calcR(a)-calcR(b))[0];
+    if (best && worst && best.name!==worst.name && calcR(worst)<thresh.roas*0.7) {
+      return `Realokasi: Pertimbangkan geser sebagian budget dari ${worst.name} (ROAS ${calcR(worst).toFixed(2)}x) ke ${best.name} (ROAS ${calcR(best).toFixed(2)}x).`;
     }
-    const diagColor = diag.startsWith("⚠")||diag.startsWith("📉")||diag.startsWith("🛒")?C.orange:diag.startsWith("👁")?C.blue:diag==="✓ Performa Baik"?C.green:C.dim;
-    return {...sk,ctr,cvr,atcRate,roas,cpc,diag,diagColor};
-  });
-
-  const totals = {
-    spend:calc.reduce((a,r)=>a+(f(r.spend)||0),0),
-    rev:calc.reduce((a,r)=>a+(f(r.revenue)||0),0),
-    klik:calc.reduce((a,r)=>a+(f(r.klik)||0),0),
-    imp:calc.reduce((a,r)=>a+(f(r.impresi)||0),0),
-    checkout:calc.reduce((a,r)=>a+(f(r.checkout)||0),0),
-  };
-  const blendedRoas = totals.spend>0?totals.rev/totals.spend:0;
-  const avgCtr = totals.imp>0?totals.klik/totals.imp*100:0;
-  const avgCvr = totals.klik>0?totals.checkout/totals.klik*100:0;
-
-  return (
-    <div>
-      <div style={{display:"grid",gridTemplateColumns:"repeat(5,1fr)",gap:10,marginBottom:20}}>
-        {[["CTR Bagus (>%)","ctr"],["CVR Bagus (>%)","cvr"],["ATC Rate Bagus (>%)","atc"],["Min ROAS","roas"],["Max CPC (Rp)","cpc"]].map(([l,k])=>(
-          <Field key={k} label={l}><Input value={thresholds[k]} onChange={v=>setThresholds(t=>({...t,[k]:parseFloat(v)||0}))} type="number"/></Field>
-        ))}
-      </div>
-
-      <Divider label="Ad Input per SKU"/>
-      <div style={{overflowX:"auto",marginBottom:12}}>
-        <table style={{width:"100%",borderCollapse:"collapse",fontSize:11,fontFamily:"'DM Mono',monospace"}}>
-          <thead>
-            <tr style={{borderBottom:`1px solid ${C.border}`}}>
-              {["SKU / Produk","Ad Spend","Impresi","Klik","Add to Cart","Checkout","Revenue dari Iklan",""].map(h=>(
-                <th key={h} style={{padding:"7px 8px",textAlign:"left",color:C.dim,fontSize:9,letterSpacing:"0.1em",textTransform:"uppercase",fontWeight:"normal"}}>{h}</th>
-              ))}
-            </tr>
-          </thead>
-          <tbody>
-            {skus.map((sk,i)=>(
-              <tr key={i} style={{borderBottom:`1px solid ${C.border}20`}}>
-                <td style={{padding:"5px 6px"}}><input value={sk.name} onChange={e=>updSku(i,"name",e.target.value)} placeholder={`SKU ${i+1}`} style={{background:"transparent",border:"none",outline:"none",color:forecastNames.includes(sk.name)?C.gold:C.text,fontFamily:"'DM Mono',monospace",fontSize:11,width:100}}/></td>
-                {["spend","impresi","klik","atc","checkout","revenue"].map(k=>(
-                  <td key={k} style={{padding:"5px 6px"}}><input type="number" value={sk[k]} onChange={e=>updSku(i,k,e.target.value)} placeholder="0" style={{background:"transparent",border:"none",outline:"none",color:C.text,fontFamily:"'DM Mono',monospace",fontSize:11,width:80,textAlign:"right"}}/></td>
-                ))}
-                <td><button onClick={()=>{const name=skus[i].name;setAdData(d=>{const n={...d};delete n[name];return n;});}} style={{background:"none",border:"none",color:C.dim,cursor:"pointer",fontSize:14}}>×</button></td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
-      </div>
-      <Btn secondary onClick={()=>{const newName=`SKU ${skus.length+1}`;setAdData(d=>({...d,[newName]:emptySku()}));}}>+ SKU</Btn>
-
-      <Divider label="Performance Analysis"/>
-      <div style={{display:"grid",gridTemplateColumns:"repeat(4,1fr)",gap:10,marginBottom:20}}>
-        <Stat label="Blended ROAS" value={blendedRoas.toFixed(1)+"x"} color={blendedRoas<thresholds.roas?C.red:blendedRoas<thresholds.roas*1.5?C.orange:C.green} hi/>
-        <Stat label="Avg CTR" value={PCT(avgCtr)} color={avgCtr<thresholds.ctr?C.red:C.green}/>
-        <Stat label="Avg CVR" value={PCT(avgCvr)} color={avgCvr<thresholds.cvr?C.red:C.green}/>
-        <Stat label="Total Ad Spend" value={IDR(totals.spend)} color={C.orange}/>
-      </div>
-
-      <div style={{overflowX:"auto"}}>
-        <table style={{width:"100%",borderCollapse:"collapse",fontSize:11,fontFamily:"'DM Mono',monospace"}}>
-          <thead>
-            <tr style={{borderBottom:`1px solid ${C.border}`}}>
-              {["SKU","CTR","CVR","ATC Rate","ROAS","CPC","Diagnosis"].map(h=>(
-                <th key={h} style={{padding:"7px 8px",textAlign:"left",color:C.dim,fontSize:9,letterSpacing:"0.1em",textTransform:"uppercase",fontWeight:"normal"}}>{h}</th>
-              ))}
-            </tr>
-          </thead>
-          <tbody>
-            {calc.filter(r=>r.name||(f(r.spend)||0)>0).map((r,i)=>(
-              <tr key={i} style={{borderBottom:`1px solid ${C.border}20`,background:i%2===0?C.s1:C.s2}}>
-                <td style={{padding:"7px 8px",color:C.text}}>{r.name||`SKU ${i+1}`}</td>
-                <td style={{padding:"7px 8px",textAlign:"right",color:r.ctr<thresholds.ctr&&r.ctr>0?C.red:C.mid}}>{r.ctr>0?PCT(r.ctr):"—"}</td>
-                <td style={{padding:"7px 8px",textAlign:"right",color:r.cvr<thresholds.cvr&&r.cvr>0?C.red:C.mid}}>{r.cvr>0?PCT(r.cvr):"—"}</td>
-                <td style={{padding:"7px 8px",textAlign:"right",color:r.atcRate>thresholds.atc?C.green:r.atcRate>0?C.orange:C.dim}}>{r.atcRate>0?PCT(r.atcRate):"—"}</td>
-                <td style={{padding:"7px 8px",textAlign:"right",color:r.roas<thresholds.roas&&r.roas>0?C.red:r.roas>=thresholds.roas*1.5?C.green:C.orange}}>{r.roas>0?r.roas.toFixed(1)+"x":"—"}</td>
-                <td style={{padding:"7px 8px",textAlign:"right",color:r.cpc>thresholds.cpc?C.red:C.mid}}>{r.cpc>0?IDR(r.cpc):"—"}</td>
-                <td style={{padding:"7px 8px",color:r.diagColor,fontSize:10}}>{r.diag}</td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
-      </div>
-    </div>
-  );
-}
-
-// ─── MODULE 6: PRODUCT TRACKER ────────────────────────────────────────────────
-function ProdTrackModule() {
-  const months = ["Jan","Feb","Mar","Apr","Mei","Jun","Jul","Agu","Sep","Okt","Nov","Des"];
-  const [trackerData, setTrackerData] = useLocalState("tracker_data", {});
-  const [view, setView] = useLocalState("tracker_view", "revenue");
-
-  // Auto-pull SKU names from Forecast
-  const forecastNames = (() => {
-    try {
-      const stored = localStorage.getItem("brandos_forecast_skus");
-      const fSkus = stored ? JSON.parse(stored) : [];
-      return fSkus.filter(sk=>sk.name).map(sk=>sk.name);
-    } catch { return []; }
+    return null;
   })();
-  const allNames = [...new Set([...forecastNames, ...Object.keys(trackerData)])].filter(Boolean);
-  const skus = allNames.length > 0
-    ? allNames.map(name => ({name, data:(trackerData[name]||Array(12).fill(""))}))
-    : Array(6).fill(null).map((_,i)=>({name:`SKU ${i+1}`,data:Array(12).fill("")}));
-
-  const updData = (i,j,v) => {
-    const name = skus[i].name;
-    const cur = trackerData[name] || Array(12).fill("");
-    const next = cur.map((d,di)=>di===j?v:d);
-    setTrackerData(d=>({...d,[name]:next}));
-  };
-  const updSku = (i,k,v) => {
-    if(k==="name") {
-      const oldName = skus[i].name;
-      const oldData = trackerData[oldName] || Array(12).fill("");
-      setTrackerData(d=>{const n={...d}; delete n[oldName]; n[v]=oldData; return n;});
-    }
-  };
-
-  const analyzed = skus.map(sk => {
-    const vals = sk.data.map(d=>f(d)||0);
-    const first3 = vals.slice(0,3).filter(v=>v>0);
-    const last3 = vals.slice(9,12).filter(v=>v>0);
-    const avgFirst = first3.length>0?first3.reduce((a,b)=>a+b,0)/first3.length:0;
-    const avgLast = last3.length>0?last3.reduce((a,b)=>a+b,0)/last3.length:0;
-    const trend = avgFirst>0?(avgLast-avgFirst)/avgFirst:0;
-    const status = trend>0.1?"📈 Growing":trend<-0.1?"📉 Declining":"→ Flat";
-    const statusColor = trend>0.1?C.green:trend<-0.1?C.red:C.mid;
-    const peak = Math.max(...vals); const peakMonth = vals.indexOf(peak);
-    return {...sk, vals, trend, status, statusColor, peak, peakMonth, total:vals.reduce((a,b)=>a+b,0)};
-  });
 
   return (
     <div>
-      <div style={{display:"flex",gap:8,marginBottom:20}}>
-        <Btn secondary={view!=="revenue"} onClick={()=>setView("revenue")}>Revenue</Btn>
-        <Btn secondary={view!=="units"} onClick={()=>setView("units")}>Units</Btn>
-      </div>
+      <h2 style={{ fontSize: 15, fontWeight: 600, marginBottom: 4, fontFamily: FONT_MONO, letterSpacing: "0.04em", color: C.text }}>Shopee Ads Performance Diagnosis</h2>
+      <p style={{ fontSize: 11, color: C.textSecondary, fontFamily: FONT_MONO, marginBottom: 16, letterSpacing: "0.03em" }}>
+        Diagnosa performa iklan per SKU di Shopee - terintegrasi dengan data forecast stok.
+      </p>
 
-      <div style={{overflowX:"auto",marginBottom:20}}>
-        <table style={{width:"100%",borderCollapse:"collapse",fontSize:11,fontFamily:"'DM Mono',monospace"}}>
-          <thead>
-            <tr style={{borderBottom:`1px solid ${C.border}`}}>
-              <th style={{padding:"7px 8px",textAlign:"left",color:C.dim,fontSize:9,letterSpacing:"0.1em",textTransform:"uppercase",fontWeight:"normal",minWidth:100}}>SKU</th>
-              {months.map(m=><th key={m} style={{padding:"7px 8px",textAlign:"right",color:C.dim,fontSize:9,fontWeight:"normal",minWidth:70}}>{m}</th>)}
-              <th style={{padding:"7px 8px",textAlign:"right",color:C.dim,fontSize:9,fontWeight:"normal"}}>Trend</th>
-              <th style={{padding:"7px 8px",textAlign:"left",color:C.dim,fontSize:9,fontWeight:"normal"}}>Status</th>
-            </tr>
-          </thead>
-          <tbody>
-            {analyzed.map((r,i)=>(
-              <tr key={i} style={{borderBottom:`1px solid ${C.border}20`,background:i%2===0?C.s1:C.s2}}>
-                <td style={{padding:"5px 6px"}}>
-                  <input value={r.name} onChange={e=>updSku(i,"name",e.target.value)} style={{background:"transparent",border:"none",outline:"none",color:forecastNames.includes(r.name)?C.gold:C.text,fontFamily:"'DM Mono',monospace",fontSize:11,width:90}}/>
-                </td>
-                {r.data.map((d,j)=>{
-                  const v = f(d)||0;
-                  const maxVal = Math.max(...analyzed.map(sk=>Math.max(...sk.vals)));
-                  const intensity = maxVal>0?v/maxVal:0;
-                  return (
-                    <td key={j} style={{padding:"5px 4px",background:v>0?`rgba(200,168,75,${intensity*0.25})`:"transparent",textAlign:"right"}}>
-                      <input type="number" value={d} onChange={e=>updData(i,j,e.target.value)} placeholder="0" style={{background:"transparent",border:"none",outline:"none",color:v>0?C.text:C.dim,fontFamily:"'DM Mono',monospace",fontSize:10,width:60,textAlign:"right"}}/>
-                    </td>
-                  );
-                })}
-                <td style={{padding:"7px 8px",textAlign:"right",color:r.statusColor}}>{PCT(r.trend*100)}</td>
-                <td style={{padding:"7px 8px",color:r.statusColor,fontSize:10}}>{r.status}</td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
-      </div>
-
-      <Divider label="Performance Summary"/>
-      <div style={{display:"grid",gridTemplateColumns:"repeat(3,1fr)",gap:10}}>
-        {analyzed.filter(r=>r.total>0).map((r,i)=>(
-          <div key={i} style={{background:C.s1,border:`1px solid ${C.border2}`,borderLeft:`3px solid ${r.statusColor}`,borderRadius:2,padding:14}}>
-            <div style={{fontSize:13,color:C.text,fontFamily:"'DM Mono',monospace",fontWeight:700,marginBottom:6}}>{r.name}</div>
-            <div style={{display:"flex",justifyContent:"space-between",marginBottom:4}}>
-              <span style={{fontSize:10,color:C.dim,fontFamily:"'DM Mono',monospace"}}>Total</span>
-              <span style={{fontSize:11,color:C.text,fontFamily:"'DM Mono',monospace"}}>{r.total>10000?IDR(r.total):NUM(r.total)}</span>
+      {/* Overall Summary */}
+      <div style={styles.card}>
+        <div style={styles.cardTitle}>Overall Performance - Semua SKU</div>
+        <div style={{ display:"grid", gridTemplateColumns:"repeat(5,1fr)", gap:12, marginBottom:16 }}>
+          {[
+            { l:"Total Spend",    v:fmt(totalSpend),              c:C.negative },
+            { l:"Total Revenue",  v:fmt(totalRevenue),            c:C.positive },
+            { l:"Blended ROAS",   v:blendedROAS.toFixed(2)+"x",  c:blendedROAS>=thresh.roas?C.positive:blendedROAS>=thresh.roas*0.6?C.warning:C.negative },
+            { l:"Cost per Order", v:fmt(blendedCPA),              c:C.textSecondary },
+            { l:"Blended CTR",    v:blendedCTR.toFixed(2)+"%",   c:blendedCTR>=thresh.ctr?C.positive:C.warning },
+          ].map(k=>(
+            <div key={k.l} style={{ ...styles.kpiBox, borderLeft:`2px solid ${k.c}` }}>
+              <div style={styles.kpiLabel}>{k.l}</div>
+              <div style={{ ...styles.kpiValue, color:k.c, fontSize:18 }}>{k.v}</div>
             </div>
-            <div style={{display:"flex",justifyContent:"space-between",marginBottom:4}}>
-              <span style={{fontSize:10,color:C.dim,fontFamily:"'DM Mono',monospace"}}>Peak</span>
-              <span style={{fontSize:11,color:C.gold,fontFamily:"'DM Mono',monospace"}}>{months[r.peakMonth]}: {r.peak>10000?IDR(r.peak):NUM(r.peak)}</span>
+          ))}
+        </div>
+        {/* Budget allocation suggestions */}
+        <div style={{ borderTop:`1px solid ${C.border}`, paddingTop:12 }}>
+          <div style={{ fontSize:10, fontFamily:FONT_MONO, color:C.textMuted, letterSpacing:"0.12em", textTransform:"uppercase", marginBottom:8 }}>Saran Alokasi Budget</div>
+          {blendedROAS < thresh.roas && totalSpend > 0 && (
+            <div style={styles.alert("warning")}>
+              Blended ROAS {blendedROAS.toFixed(2)}x di bawah target {thresh.roas}x. Evaluasi SKU dengan ROAS terendah - pertimbangkan geser budget ke SKU yang perform lebih baik sebelum scale total.
             </div>
-            <div style={{display:"flex",justifyContent:"space-between"}}>
-              <span style={{fontSize:10,color:C.dim,fontFamily:"'DM Mono',monospace"}}>Trend</span>
-              <span style={{fontSize:11,color:r.statusColor,fontFamily:"'DM Mono',monospace"}}>{r.status}</span>
+          )}
+          {blendedROAS >= thresh.roas && (
+            <div style={styles.alert("positive")}>
+              Blended ROAS sehat ({blendedROAS.toFixed(2)}x). SKU terbaik bisa dipertimbangkan untuk scale bertahap - naikkan budget max 20% per 3 hari.
             </div>
-          </div>
-        ))}
-      </div>
-    </div>
-  );
-}
-
-// ─── MODULE 7: UNIT ECONOMICS ─────────────────────────────────────────────────
-function UnitEconModule() {
-  const [d, setD] = useLocalState("unitecon", {rev:"",cogs:"47",tRev:"",sRev:"",kRev:"",oRev:"",tFee:"8",sFee:"10",kFee:"7",oFee:"30",ads:"",aff:"5",ret:"3",sdm:"",ops:"",rent:"",price:"",ucogs:"",pkg:""});
-  const s = k => v => setD(p=>({...p,[k]:v}));
-  const [calc, setCalc] = useState(null);
-
-  const run = () => {
-    const rev=f(d.rev)||0, cogs=f(d.cogs)/100||0;
-    const tRev=f(d.tRev)||0, sRev=f(d.sRev)||0, kRev=f(d.kRev)||0, oRev=f(d.oRev)||0;
-    const tFee=f(d.tFee)/100||0, sFee=f(d.sFee)/100||0, kFee=f(d.kFee)/100||0, oFee=f(d.oFee)/100||0;
-    const ads=f(d.ads)||0, aff=f(d.aff)/100||0, ret=f(d.ret)/100||0;
-    const sdm=f(d.sdm)||0, ops=f(d.ops)||0, rent=f(d.rent)||0;
-    const price=f(d.price)||0, ucogs=f(d.ucogs)||0, pkg=f(d.pkg)||0;
-
-    const grossProfit = rev*(1-cogs);
-    const tFeeAmt=tRev*tFee, sFeeAmt=sRev*sFee, kFeeAmt=kRev*kFee, oFeeAmt=oRev*oFee;
-    const affAmt=rev*aff, retAmt=rev*ret;
-    const totalFees = tFeeAmt+sFeeAmt+kFeeAmt+oFeeAmt+affAmt+retAmt;
-    const afterFees = grossProfit - ads - totalFees;
-    const totalFixed = sdm+ops+rent;
-    const npm = afterFees - totalFixed;
-    const npmPct = rev>0?(npm/rev)*100:0;
-    const blendedFeeRate = rev>0?totalFees/rev:0;
-    const roas = ads>0?rev/ads:0;
-    const unitFees = price>0?price*blendedFeeRate:0;
-    const unitAds = price>0&&rev>0?price*(ads/rev):0;
-    const contrib = price - ucogs - pkg - unitFees - unitAds;
-    const contribPct = price>0?(contrib/price)*100:0;
-    const breakeven = contrib>0&&totalFixed>0?Math.ceil(totalFixed/contrib):0;
-    const breakevenRev = breakeven*price;
-    const vendorFloat = rev*cogs*(60/30);
-
-    setCalc({grossProfit,totalFees,tFeeAmt,sFeeAmt,kFeeAmt,oFeeAmt,affAmt,retAmt,afterFees,totalFixed,npm,npmPct,blendedFeeRate,roas,contrib,contribPct,breakeven,breakevenRev,vendorFloat,ads,rev,cogs});
-  };
-
-  return (
-    <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:32}}>
-      <div>
-        <Divider label="Revenue & COGS"/>
-        <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:10}}>
-          <Field label="Total Revenue Bulanan"><Input value={d.rev} onChange={s("rev")} prefix="Rp" type="number"/></Field>
-          <Field label="Blended COGS %" hint="HPP termasuk packaging"><Input value={d.cogs} onChange={s("cogs")} suffix="%" type="number"/></Field>
-        </div>
-        <Divider label="Channel Revenue"/>
-        <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:10}}>
-          <Field label="TikTok Shop Rev"><Input value={d.tRev} onChange={s("tRev")} prefix="Rp" type="number"/></Field>
-          <Field label="Fee TikTok %"><Input value={d.tFee} onChange={s("tFee")} suffix="%" type="number"/></Field>
-          <Field label="Shopee Rev"><Input value={d.sRev} onChange={s("sRev")} prefix="Rp" type="number"/></Field>
-          <Field label="Fee Shopee %"><Input value={d.sFee} onChange={s("sFee")} suffix="%" type="number"/></Field>
-          <Field label="Tokopedia Rev"><Input value={d.kRev} onChange={s("kRev")} prefix="Rp" type="number"/></Field>
-          <Field label="Fee Tokopedia %"><Input value={d.kFee} onChange={s("kFee")} suffix="%" type="number"/></Field>
-          <Field label="Offline Rev"><Input value={d.oRev} onChange={s("oRev")} prefix="Rp" type="number"/></Field>
-          <Field label="Konsinyasi %"><Input value={d.oFee} onChange={s("oFee")} suffix="%" type="number"/></Field>
-        </div>
-        <Divider label="Variable & Fixed Costs"/>
-        <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:10}}>
-          <Field label="Ads Spend"><Input value={d.ads} onChange={s("ads")} prefix="Rp" type="number"/></Field>
-          <Field label="Affiliator %"><Input value={d.aff} onChange={s("aff")} suffix="%" type="number"/></Field>
-          <Field label="Return Rate %"><Input value={d.ret} onChange={s("ret")} suffix="%" type="number"/></Field>
-          <Field label="SDM / Gaji"><Input value={d.sdm} onChange={s("sdm")} prefix="Rp" type="number"/></Field>
-          <Field label="Operasional"><Input value={d.ops} onChange={s("ops")} prefix="Rp" type="number"/></Field>
-          <Field label="Sewa / Gudang"><Input value={d.rent} onChange={s("rent")} prefix="Rp" type="number"/></Field>
-        </div>
-        <Divider label="Per Unit"/>
-        <div style={{display:"grid",gridTemplateColumns:"1fr 1fr 1fr",gap:10}}>
-          <Field label="Avg Selling Price"><Input value={d.price} onChange={s("price")} prefix="Rp" type="number"/></Field>
-          <Field label="COGS / Unit"><Input value={d.ucogs} onChange={s("ucogs")} prefix="Rp" type="number"/></Field>
-          <Field label="Packaging / Unit"><Input value={d.pkg} onChange={s("pkg")} prefix="Rp" type="number"/></Field>
-        </div>
-        <div style={{marginTop:8}}><Btn onClick={run}>Hitung Unit Economics →</Btn></div>
+          )}
+  {budgetReallocSuggestion && <div style={styles.alert("accent")}>{budgetReallocSuggestion}</div>}        </div>
       </div>
 
-      <div>
-        {!calc ? (
-          <div style={{display:"flex",alignItems:"center",justifyContent:"center",height:"100%",color:C.dim,fontFamily:"'DM Mono',monospace",fontSize:11,letterSpacing:"0.1em",textAlign:"center"}}>ISI DATA → HITUNG</div>
-        ) : (
-          <>
-            <Divider label="P&L Waterfall"/>
-            {[
-              {l:"Revenue",v:calc.rev,color:C.text,bold:true},
-              {l:`— COGS (${d.cogs}%)`,v:-calc.rev*calc.cogs,color:C.red},
-              {l:"= Gross Profit",v:calc.grossProfit,color:C.green,bold:true},
-              {l:"— Ads Spend",v:-calc.ads,color:C.orange},
-              {l:"— TikTok Fee",v:-calc.tFeeAmt,color:C.red},
-              {l:"— Shopee Fee",v:-calc.sFeeAmt,color:C.red},
-              {l:"— Tokopedia Fee",v:-calc.kFeeAmt,color:C.red},
-              {l:"— Offline Fee",v:-calc.oFeeAmt,color:C.red},
-              {l:"— Affiliator",v:-calc.affAmt,color:C.red},
-              {l:"— Returns",v:-calc.retAmt,color:C.red},
-              {l:"= After Fees",v:calc.afterFees,color:C.text,bold:true},
-              {l:"— Fixed Costs",v:-calc.totalFixed,color:C.red},
-              {l:"= NET PROFIT",v:calc.npm,color:calc.npmPct<5?C.red:calc.npmPct<10?C.orange:C.green,bold:true},
-            ].map((row,i)=>(
-              <div key={i} style={{display:"flex",justifyContent:"space-between",alignItems:"center",padding:"6px 0",borderBottom:row.bold?`1px solid ${C.border}`:"none"}}>
-                <span style={{fontSize:row.bold?11:10,color:C.mid,fontFamily:"'DM Mono',monospace"}}>{row.l}</span>
-                <span style={{fontSize:row.bold?14:12,color:row.color,fontFamily:"'Cormorant Garamond',serif",fontWeight:row.bold?700:400}}>{IDR(row.v)}</span>
+      {/* Threshold Settings */}
+      <div style={styles.card}>
+        <div style={styles.cardTitle}>Threshold KPI</div>
+        <div style={{ display: "grid", gridTemplateColumns: "repeat(5, 1fr)", gap: 12 }}>
+          {[
+            { f: "roas", l: "Target ROAS (x)" },
+            { f: "ctr", l: "Min CTR (%)" },
+            { f: "cvr", l: "Min CVR (%)" },
+            { f: "atc", l: "Min ATC Rate (%)" },
+            { f: "cpc", l: "Max CPC (Rp)" },
+          ].map(({ f, l }) => (
+            <div key={f}>
+              <label style={styles.label}>{l}</label>
+              <input type="number" value={thresh[f]} onChange={(e) => updateThresh(f, e.target.value)}
+                style={styles.input} step={f === "roas" || f === "ctr" || f === "cvr" ? 0.1 : 500} />
+            </div>
+          ))}
+        </div>
+      </div>
+
+      {/* Per-SKU cards */}
+      {skus.map((sku, i) => {
+        const c = calc(sku);
+        const fc = getForecastContext(sku.name);
+        const { sarads, sarstock } = getSaran(sku, c, fc);
+
+        const stockBadge = fc ? {
+          ok:           { label: "Stok Aman",       color: C.green },
+          low:          { label: "Stok Menipis",    color: C.yellow },
+          critical:     { label: "Stok Kritis",    color: C.red },
+          overstock:    { label: "Overstock",       color: C.yellow },
+          deadstock_risk: { label: "Deadstock Risk", color: C.red },
+        }[fc.status] : null;
+
+        return (
+          <div key={i} style={{ ...styles.card, marginBottom: 20, borderLeft: `4px solid ${c.roas >= thresh.roas ? C.green : c.roas >= 1.5 ? C.yellow : C.red}` }}>
+            {/* SKU Header */}
+            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 14 }}>
+              <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+                <div style={{ fontSize: 15, fontWeight: "bold" }}>{sku.name}</div>
+                {stockBadge && (
+                  <span style={{ fontSize: 10, fontFamily: FONT_MONO, padding: "2px 8px", borderRadius: 3, background: stockBadge.color + "22", color: stockBadge.color, fontWeight: "bold", border: `1px solid ${stockBadge.color}` }}>
+                    {stockBadge.label}
+                  </span>
+                )}
+                {fc && (
+                  <span style={{ fontSize: 10, fontFamily: FONT_MONO, color: C.textMuted }}>
+                    {fc.daysOfStock.toFixed(0)} hari stok tersisa
+                  </span>
+                )}
               </div>
-            ))}
-            <div style={{padding:"10px 13px",background:calc.npmPct<5?C.redBg:C.greenBg,border:`1px solid ${calc.npmPct<5?C.red:C.green}40`,borderRadius:2,marginTop:8,display:"flex",justifyContent:"space-between",alignItems:"center"}}>
-              <span style={{fontSize:11,color:C.mid,fontFamily:"'DM Mono',monospace"}}>NPM</span>
-              <span style={{fontSize:22,fontFamily:"'Cormorant Garamond',serif",fontWeight:700,color:calc.npmPct<5?C.red:calc.npmPct<10?C.orange:C.green}}>{PCT(calc.npmPct)}</span>
+              <div style={{ display: "flex", gap: 16, fontFamily: FONT_MONO, fontSize: 12 }}>
+                <span style={{ color: c.roas >= thresh.roas ? C.positive : C.negative, fontWeight: "bold" }}>ROAS {c.roas.toFixed(2)}x</span>
+                <span style={{ color: c.ctr >= thresh.ctr ? C.positive : C.negative }}>CTR {c.ctr.toFixed(2)}%</span>
+                <span style={{ color: c.cvr >= thresh.cvr ? C.positive : C.negative }}>CVR {c.cvr.toFixed(2)}%</span>
+              </div>
             </div>
 
-            <Divider label="Key Metrics"/>
-            <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:8,marginBottom:12}}>
-              <Stat label="ROAS" value={calc.roas.toFixed(1)+"x"} color={calc.roas<3?C.red:calc.roas<5?C.orange:C.green}/>
-              <Stat label="Blended Fee Rate" value={PCT(calc.blendedFeeRate*100)}/>
-              <Stat label="Contribution/Unit" value={IDR(calc.contrib)} color={calc.contrib<0?C.red:C.green} sub={PCT(calc.contribPct)+" per unit"}/>
-              <Stat label="Break-even Units" value={NUM(calc.breakeven)} sub={IDR(calc.breakevenRev)} hi/>
+            {/* Input row */}
+            <div style={{ display: "grid", gridTemplateColumns: "repeat(7, 1fr)", gap: 8, marginBottom: 14 }}>
+              {[
+                { f: "impr", l: "Impresi" },
+                { f: "clicks", l: "Klik" },
+                { f: "atc", l: "ATC" },
+                { f: "orders", l: "Order" },
+                { f: "revenue", l: "Revenue (Rp)" },
+                { f: "spend", l: "Spend (Rp)" },
+                { f: "dailyBudget", l: "Budget/Hari (Rp)" },
+              ].map(({ f, l }) => (
+                <div key={f}>
+                  <label style={styles.label}>{l}</label>
+                  <input type="number" value={sku[f] || 0} onChange={(e) => update(i, f, e.target.value)} style={styles.input} />
+                </div>
+              ))}
             </div>
-            <Stat label="Vendor Float (Net 60)" value={IDR(calc.vendorFloat)} sub="Working capital dari hutang vendor"/>
 
-            {calc.npmPct<5 && <div style={{marginTop:12}}><Alert type="bad" label="NPM Warning" note="NPM di bawah 5% — margin terlalu tipis. Review ads efficiency dan struktur COGS sebelum scale."/></div>}
-            {calc.roas<3 && calc.ads>0 && <Alert type="warn" label="ROAS Rendah" note="Ads spend tidak efisien. Audit creative performance sebelum scale budget."/>}
-            {calc.contrib<0 && <Alert type="bad" label="Negative Contribution" note="Per unit contribution negatif — setiap penjualan rugi. Review COGS atau harga jual segera."/>}
-          </>
-        )}
-      </div>
+            {/* Metrics strip */}
+            <div style={{ display: "flex", gap: 10, marginBottom: 14, flexWrap: "wrap" }}>
+              {[
+                { l: "CTR", v: c.ctr.toFixed(2) + "%", ok: c.ctr >= thresh.ctr },
+                { l: "CVR", v: c.cvr.toFixed(2) + "%", ok: c.cvr >= thresh.cvr },
+                { l: "ATC Rate", v: c.atcR.toFixed(1) + "%", ok: c.atcR >= thresh.atc },
+                { l: "ROAS", v: c.roas.toFixed(2) + "x", ok: c.roas >= thresh.roas },
+                { l: "CPC", v: fmt(c.cpc), ok: c.cpc <= thresh.cpc },
+                { l: "CPA", v: fmt(c.cpa), ok: true },
+              ].map(({ l, v, ok }) => (
+                <div key={l} style={{ background: ok ? C.positiveLight : C.negativeLight, border: `1px solid ${ok ? C.positiveDim : C.negativeDim}`, borderRadius: 5, padding: "6px 12px", textAlign: "center" }}>
+                  <div style={{ fontSize: 9, fontFamily: FONT_MONO, color: C.textMuted }}>{l}</div>
+                  <div style={{ fontSize: 13, fontWeight: "bold", color: ok ? C.positive : C.negative, fontFamily: FONT_MONO }}>{v}</div>
+                </div>
+              ))}
+            </div>
+
+            {/* Diagnosa Ads */}
+            {sarads.length > 0 && (
+              <div style={{ marginBottom: 12 }}>
+                <div style={{ fontSize: 11, fontFamily: FONT_MONO, color: C.textMuted, marginBottom: 6, fontWeight: "bold", letterSpacing: "0.08em" }}>DIAGNOSA IKLAN</div>
+                {sarads.map((s, j) => (
+                  <div key={j} style={{ ...styles.alert(s.type), marginBottom: 6 }}>{s.text}</div>
+                ))}
+              </div>
+            )}
+
+            {/* Saran Berbasis Stok */}
+            <div>
+              <div style={{ fontSize: 11, fontFamily: FONT_MONO, color: C.textMuted, marginBottom: 6, fontWeight: "bold", letterSpacing: "0.08em" }}>SARAN - KONDISI STOK</div>
+              {sarstock.map((s, j) => (
+                <div key={j} style={{ padding: "10px 14px", borderRadius: 6, marginBottom: 6, border: `1px solid`, borderColor: s.type === "red" ? C.red : s.type === "yellow" ? C.yellow : s.type === "green" ? C.green : C.gold, background: s.type === "red" ? C.redLight : s.type === "yellow" ? C.yellowLight : s.type === "green" ? C.greenLight : C.goldLight }}>
+                  <div style={{ fontSize: 12, fontFamily: FONT_MONO, fontWeight: "bold", color: s.type === "red" ? C.red : s.type === "yellow" ? C.yellow : s.type === "green" ? C.green : C.gold, marginBottom: 4 }}>
+                    {s.icon} {s.text}
+                  </div>
+                  <div style={{ fontSize: 11, fontFamily: FONT_MONO, color: C.text, lineHeight: 1.6 }}>
+                    -> {s.action}
+                  </div>
+                </div>
+              ))}
+            </div>
+          </div>
+        );
+      })}
     </div>
   );
 }
 
-// ─── MODULE 8: DASHBOARD ──────────────────────────────────────────────────────
-function DashboardModule() {
+// --- PRODUCT TRACKER -------------------------------------------------------
+function ProductTracker({ skuNames }) {
+  // -- Baca dari Forecast v2 --------------------------------------
+  const forecastSkusRaw = (() => {
+    try { return JSON.parse(localStorage.getItem("forecast_skus_v2")) || []; } catch { return []; }
+  })();
+  const forecastMonth = (() => {
+    try { return parseInt(localStorage.getItem("forecast_month") || new Date().getMonth()); } catch { return new Date().getMonth(); }
+  })();
+
+  // Actual bulan ini - hanya unit terjual bulan ini, retur, rating yang diinput manual
+  const defaultActual = () => skuNames.map(name => ({ name, unitsSold: 0, returns: 0, rating: 4.5 }));
+  const [actual, setActual] = useState(() => {
+    try { return JSON.parse(localStorage.getItem("tracker_actual")) || defaultActual(); } catch { return defaultActual(); }
+  });
+  useEffect(() => {
+    const updated = skuNames.map((name, i) => actual[i] ? { ...actual[i], name } : { name, unitsSold: 0, returns: 0, rating: 4.5 });
+    setActual(updated);
+  }, [skuNames]);
+  useEffect(() => { localStorage.setItem("tracker_actual", JSON.stringify(actual)); }, [actual]);
+
+  const updateActual = (i, f, v) => {
+    const c = [...actual]; c[i] = { ...c[i], [f]: f === "rating" ? num(v) : num(v) }; setActual(c);
+  };
+
+  // Build rows: merge forecast hist + actual bulan ini
+  const rows = skuNames.map((name, i) => {
+    const fs = forecastSkusRaw.find(f => f.name === name);
+    const hist = fs?.hist || [0, 0, 0];
+    const filledHist = hist.filter(v => v > 0);
+    const avgSales = fs?.histOverride ? fs.avgSales : (filledHist.length > 0 ? filledHist.reduce((a,b)=>a+b,0)/filledHist.length : fs?.avgSales || 0);
+    const seasonMult = SEASONS[forecastMonth]?.mult || 1;
+    const forecastBulanIni = Math.round(avgSales * seasonMult);
+    const price = fs?.price || 0;
+    const cat = fs ? getCategoryConfig(fs.category || "potential") : getCategoryConfig("potential");
+    const act = actual[i] || { unitsSold: 0, returns: 0, rating: 4.5 };
+    const revenueAktual = act.unitsSold * price;
+    const vsTarget = forecastBulanIni > 0 ? ((act.unitsSold - forecastBulanIni) / forecastBulanIni * 100) : 0;
+    const returnRate = act.unitsSold > 0 ? (act.returns / act.unitsSold * 100) : 0;
+    return { name, hist, avgSales, forecastBulanIni, price, cat, act, revenueAktual, vsTarget, returnRate };
+  });
+
+  const prevMonths = [
+    MONTHS_ALL[(forecastMonth - 3 + 12) % 12],
+    MONTHS_ALL[(forecastMonth - 2 + 12) % 12],
+    MONTHS_ALL[(forecastMonth - 1 + 12) % 12],
+  ];
+  const curMonthName = MONTHS_ALL[forecastMonth];
+  const noForecastData = forecastSkusRaw.length === 0;
+
+  const totalForecast = rows.reduce((s, r) => s + r.forecastBulanIni, 0);
+  const totalAktual   = rows.reduce((s, r) => s + r.act.unitsSold, 0);
+  const totalRevAktual = rows.reduce((s, r) => s + r.revenueAktual, 0);
+
   return (
-    <div style={{display:"flex",alignItems:"center",justifyContent:"center",minHeight:300,flexDirection:"column",gap:16}}>
-      <div style={{fontSize:32,opacity:0.3}}>◎</div>
-      <div style={{fontSize:12,color:C.dim,fontFamily:"'DM Mono',monospace",textAlign:"center",lineHeight:1.8}}>
-        Dashboard otomatis tersedia di versi Excel.<br/>
-        Isi semua modul di atas, lalu buka file .xlsx<br/>
-        untuk melihat Summary Dashboard yang auto-pull<br/>dari semua sheet.
+    <div>
+      <h2 style={{ fontSize: 15, fontWeight: 600, marginBottom: 4, fontFamily: FONT_MONO, letterSpacing: "0.04em", color: C.text }}>Product Performance Tracker</h2>
+      <p style={{ fontSize: 11, color: C.textSecondary, fontFamily: FONT_MONO, marginBottom: 16, letterSpacing: "0.03em" }}>
+        Performa aktual vs forecast per SKU. Histori 3 bulan otomatis dari Demand Forecast.
+      </p>
+
+      {noForecastData && (
+        <div style={styles.alert("yellow")}>Isi modul Demand Forecast terlebih dahulu - histori penjualan & target akan otomatis muncul di sini.</div>
+      )}
+
+      {/* KPI summary */}
+      <div style={{ display: "grid", gridTemplateColumns: "repeat(3, 1fr)", gap: 12, marginBottom: 16 }}>
+        {[
+          { label: `Target Forecast ${curMonthName}`, val: totalForecast + " unit", color: C.accent },
+          { label: `Aktual Terjual ${curMonthName}`, val: totalAktual + " unit", color: totalAktual >= totalForecast ? C.positive : C.negative },
+          { label: "Revenue Aktual", val: fmt(totalRevAktual), color: C.green },
+        ].map(k => (
+          <div key={k.label} style={{ ...styles.kpiBox, borderLeft: `3px solid ${k.color}` }}>
+            <div style={styles.kpiLabel}>{k.label}</div>
+            <div style={{ fontSize: 18, fontWeight: "bold", color: k.color, fontFamily: FONT_MONO }}>{k.val}</div>
+          </div>
+        ))}
       </div>
-    </div>
-  );
-}
 
-// ─── PLAN MODULE ─────────────────────────────────────────────────────────────
-function PlanModule() {
-  const [d, setD] = useLocalState("plan_main", {vision:"",mission:"",goal12:"",goal3yr:"",targetMarket:"",marketSize:"",competitors:"",differentiator:"",positioning:""});
-  const [milestones, setMilestones] = useLocalState("plan_milestones", Array(6).fill(null).map((_,i)=>({month:`Bulan ${i+1}`,revenue:"",initiative:"",kpi:""})));
-  const [risks, setRisks] = useLocalState("plan_risks", Array(3).fill(null).map((_,i)=>({risk:"",prob:"",impact:"",mitigation:""})));
-  const s = k => v => setD(p=>({...p,[k]:v}));
-  const updM = (i,k,v) => setMilestones(m=>m.map((r,idx)=>idx===i?{...r,[k]:v}:r));
-  const updR = (i,k,v) => setRisks(r=>r.map((rr,idx)=>idx===i?{...rr,[k]:v}:rr));
+      {/* Main table */}
+      <div style={styles.card}>
+        <div style={{ overflowX: "auto" }}>
+          <table style={styles.table}>
+            <thead>
+              <tr>
+                {[
+                  "SKU", "Kategori",
+                  prevMonths[0], prevMonths[1], prevMonths[2],
+                  `Target ${curMonthName}`,
+                  `Aktual ${curMonthName}`, "Revenue Aktual",
+                  "vs Target", "Retur", "Return Rate", "Rating"
+                ].map(h => <th key={h} style={styles.th}>{h}</th>)}
+              </tr>
+            </thead>
+            <tbody>
+              {rows.map((row, i) => {
+                const vsColor = row.vsTarget >= 0 ? C.positive : row.vsTarget >= -15 ? C.warning : C.negative;
+                return (
+                  <tr key={i} style={{ borderLeft: `2px solid ${row.cat.color}` }}>
+                    <td style={{ ...styles.td, fontWeight: "bold" }}>{row.name}</td>
+                    <td style={{ ...styles.td, color: row.cat.color, fontSize: 11 }}>{row.cat.label}</td>
 
-  return (
-    <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:32}}>
-      <div>
-        <Divider label="Vision & Mission"/>
-        <Field label="Vision" hint="5–10 tahun ke depan"><Input value={d.vision} onChange={s("vision")} multiline rows={2} placeholder="Menjadi brand menswear urban terdepan..."/></Field>
-        <Field label="Mission"><Input value={d.mission} onChange={s("mission")} multiline rows={2} placeholder="Merancang produk yang menemani urban man..."/></Field>
-        <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:10}}>
-          <Field label="Target 12 Bulan"><Input value={d.goal12} onChange={s("goal12")} placeholder="Rp 2M/bulan, 3 channel"/></Field>
-          <Field label="Target 3 Tahun"><Input value={d.goal3yr} onChange={s("goal3yr")} placeholder="Series A, ekspansi SEA"/></Field>
+                    {/* History 3 bulan - read only dari forecast */}
+                    {row.hist.map((h, mi) => (
+                      <td key={mi} style={{ ...styles.td, color: C.textMuted, fontStyle: "italic" }}>{h > 0 ? h : "-"}</td>
+                    ))}
+
+                    {/* Target forecast bulan ini - read only */}
+                    <td style={{ ...styles.td, fontWeight: "bold", color: C.accent }}>{row.forecastBulanIni}</td>
+
+                    {/* Aktual input */}
+                    <td style={styles.td}>
+                      <input type="number" value={row.act.unitsSold}
+                        onChange={e => updateActual(i, "unitsSold", e.target.value)}
+                        style={{ ...styles.input, width: 80 }} />
+                    </td>
+
+                    <td style={{ ...styles.td, fontWeight: "bold", color: C.green }}>{fmt(row.revenueAktual)}</td>
+
+                    {/* vs Target */}
+                    <td style={{ ...styles.td, fontWeight: "bold", color: vsColor }}>
+                      {row.vsTarget > 0 ? "▲" : row.vsTarget < 0 ? "▼" : "="}{Math.abs(row.vsTarget).toFixed(1)}%
+                    </td>
+
+                    {/* Retur input */}
+                    <td style={styles.td}>
+                      <input type="number" value={row.act.returns}
+                        onChange={e => updateActual(i, "returns", e.target.value)}
+                        style={{ ...styles.input, width: 70 }} />
+                    </td>
+
+                    <td style={{ ...styles.td, color: row.returnRate > 5 ? C.negative : C.positive }}>
+                      {row.returnRate.toFixed(1)}%
+                    </td>
+
+                    {/* Rating input */}
+                    <td style={styles.td}>
+                      <input type="number" value={row.act.rating}
+                        onChange={e => updateActual(i, "rating", e.target.value)}
+                        style={{ ...styles.input, width: 65 }} step={0.1} min={1} max={5} />
+                    </td>
+                  </tr>
+                );
+              })}
+              {/* Total row */}
+              <tr style={{ background: C.surfaceAlt }}>
+                <td style={{ ...styles.td, fontWeight: "bold" }} colSpan={2}>TOTAL</td>
+                {[0,1,2].map(mi => (
+                  <td key={mi} style={{ ...styles.td, color: C.textMuted, fontStyle: "italic" }}>
+                    {rows.reduce((s,r) => s + (r.hist[mi]||0), 0) || "-"}
+                  </td>
+                ))}
+                <td style={{ ...styles.td, fontWeight: "bold", color: C.accent }}>{totalForecast}</td>
+                <td style={{ ...styles.td, fontWeight: "bold", color: totalAktual >= totalForecast ? C.positive : C.negative }}>{totalAktual}</td>
+                <td style={{ ...styles.td, fontWeight: "bold", color: C.green }}>{fmt(totalRevAktual)}</td>
+                <td style={{ ...styles.td, fontWeight: "bold", color: totalAktual >= totalForecast ? C.positive : C.negative }}>
+                  {totalForecast > 0 ? ((totalAktual - totalForecast) / totalForecast * 100).toFixed(1) + "%" : "-"}
+                </td>
+                <td colSpan={3} style={styles.td} />
+              </tr>
+            </tbody>
+          </table>
         </div>
-        <Divider label="Market & Positioning"/>
-        <Field label="Target Market" hint="Demografis + psikografis"><Input value={d.targetMarket} onChange={s("targetMarket")} multiline rows={2} placeholder="Pria urban 25-38 tahun..."/></Field>
-        <Field label="Market Size"><Input value={d.marketSize} onChange={s("marketSize")} placeholder="Rp 15T (menswear premium Indonesia)"/></Field>
-        <Field label="Kompetitor Utama"><Input value={d.competitors} onChange={s("competitors")} placeholder="About Blank, DILI, ..."/></Field>
-        <Field label="Differentiator"><Input value={d.differentiator} onChange={s("differentiator")} multiline rows={2} placeholder="Premium offline presence + digital play..."/></Field>
-        <Field label="Positioning Statement"><Input value={d.positioning} onChange={s("positioning")} multiline rows={2} placeholder="Untuk urban professional yang..."/></Field>
-      </div>
-      <div>
-        <Divider label="6-Month Milestones"/>
-        {milestones.map((m,i)=>(
-          <div key={i} style={{display:"grid",gridTemplateColumns:"80px 1fr 1fr 1fr",gap:8,marginBottom:8}}>
-            <div style={{fontSize:10,color:C.gold,fontFamily:"'DM Mono',monospace",paddingTop:28}}>{m.month}</div>
-            <Field label="Revenue Target"><Input value={m.revenue} onChange={v=>updM(i,"revenue",v)} prefix="Rp" type="number" small/></Field>
-            <Field label="Inisiatif"><Input value={m.initiative} onChange={v=>updM(i,"initiative",v)} small/></Field>
-            <Field label="KPI"><Input value={m.kpi} onChange={v=>updM(i,"kpi",v)} small/></Field>
-          </div>
-        ))}
-        <Divider label="Risk & Mitigation"/>
-        {risks.map((r,i)=>(
-          <div key={i} style={{display:"grid",gridTemplateColumns:"1fr 80px 80px 1fr",gap:8,marginBottom:8}}>
-            <Field label={`Risk ${i+1}`}><Input value={r.risk} onChange={v=>updR(i,"risk",v)} small/></Field>
-            <Field label="Prob"><Input value={r.prob} onChange={v=>updR(i,"prob",v)} small/></Field>
-            <Field label="Impact"><Input value={r.impact} onChange={v=>updR(i,"impact",v)} small/></Field>
-            <Field label="Mitigasi"><Input value={r.mitigation} onChange={v=>updR(i,"mitigation",v)} small/></Field>
-          </div>
-        ))}
+        <div style={{ marginTop: 8, fontSize: 10, color: C.textMuted, fontFamily: FONT_MONO }}>
+          * Histori 3 bulan & target otomatis dari Demand Forecast. Input manual hanya: unit terjual bulan ini, retur, dan rating.
+        </div>
       </div>
     </div>
   );
 }
 
-// ─── PASSWORD GATE ────────────────────────────────────────────────────────────
-const APP_PASSWORD = "brandos2024"; // Ganti password di sini
+// --- UNIT ECONOMICS ---------------------------------------------------------
+function UnitEconomics() {
+  const [d, setD] = useState(() => {
+    try {
+      return JSON.parse(localStorage.getItem("ue")) || {
+        price: 299000, cogs: 140000, marketplace_fee: 8, adSpendPct: 13,
+        packaging: 5000, shipping_subsidy: 0, return_rate: 3
+      };
+    } catch { return { price: 299000, cogs: 140000, marketplace_fee: 8, adSpendPct: 13, packaging: 5000, shipping_subsidy: 0, return_rate: 3 }; }
+  });
+  useEffect(() => { localStorage.setItem("ue", JSON.stringify(d)); }, [d]);
+  const set = (k, v) => setD({ ...d, [k]: num(v) });
 
-function PasswordGate({onUnlock}) {
-  const [input, setInput] = useState("");
-  const [error, setError] = useState(false);
-  const [shake, setShake] = useState(false);
+  const mktFee = d.price * (d.marketplace_fee / 100);
+  const adCost = d.price * (d.adSpendPct / 100);
+  const netRevenue = d.price - mktFee - d.shipping_subsidy;
+  const grossProfit = netRevenue - d.cogs - d.packaging;
+  const netProfit = grossProfit - adCost;
+  const netMargin = d.price > 0 ? (netProfit / d.price) * 100 : 0;
+  const returnCost = d.cogs * (d.return_rate / 100);
+  const adjustedNetProfit = netProfit - returnCost;
 
-  const attempt = () => {
-    if (input === APP_PASSWORD) {
-      try { localStorage.setItem("brandos_auth", "1"); } catch {}
-      onUnlock();
-    } else {
-      setError(true);
-      setShake(true);
-      setTimeout(() => setShake(false), 500);
-      setInput("");
+  return (
+    <div>
+      <h2 style={{ fontSize: 15, fontWeight: 600, marginBottom: 4, fontFamily: FONT_MONO, letterSpacing: "0.04em", color: C.text }}>Unit Economics</h2>
+      <p style={{ fontSize: 12, color: C.textMuted, fontFamily: FONT_MONO, marginBottom: 24 }}>Breakdown profit per unit terjual.</p>
+      <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 20 }}>
+        <div style={styles.card}>
+          <div style={styles.cardTitle}>Input</div>
+          {[
+            { key: "price", label: "Harga Jual (Rp)" },
+            { key: "cogs", label: "HPP / COGS (Rp)" },
+            { key: "marketplace_fee", label: "Marketplace Fee (%)" },
+            { key: "adSpendPct", label: "Ad Spend (% dari harga)" },
+            { key: "packaging", label: "Packaging (Rp)" },
+            { key: "shipping_subsidy", label: "Subsidi Ongkir (Rp)" },
+            { key: "return_rate", label: "Return Rate (%)" },
+          ].map(({ key, label }) => (
+            <div key={key} style={{ marginBottom: 12 }}>
+              <label style={styles.label}>{label}</label>
+              <input type="number" value={d[key]} onChange={(e) => set(key, e.target.value)} style={styles.input} />
+            </div>
+          ))}
+        </div>
+        <div style={styles.card}>
+          <div style={styles.cardTitle}>Hasil per Unit</div>
+          <table style={styles.table}>
+            <tbody>
+              {[
+                { label: "Harga Jual", val: d.price, bold: false },
+                { label: `Marketplace Fee (${d.marketplace_fee}%)`, val: -mktFee },
+                { label: "Subsidi Ongkir", val: -d.shipping_subsidy },
+                { label: "Net Revenue", val: netRevenue, bold: true },
+                { label: "COGS", val: -d.cogs },
+                { label: "Packaging", val: -d.packaging },
+                { label: "Gross Profit", val: grossProfit, bold: true },
+                { label: `Ad Cost (${d.adSpendPct}%)`, val: -adCost },
+                { label: "Net Profit", val: netProfit, bold: true },
+                { label: `Return Cost (${d.return_rate}%)`, val: -returnCost },
+                { label: "Adjusted Net Profit", val: adjustedNetProfit, bold: true },
+                { label: "Net Margin", val: null, display: netMargin.toFixed(1) + "%", bold: true, color: netMargin > 15 ? C.green : netMargin > 5 ? C.yellow : C.red },
+              ].map((row, i) => (
+                <tr key={i} style={{ background: row.bold ? C.surfaceAlt : "transparent" }}>
+                  <td style={{ ...styles.td, fontWeight: row.bold ? "bold" : "normal" }}>{row.label}</td>
+                  <td style={{ ...styles.td, textAlign: "right", fontWeight: row.bold ? "bold" : "normal", color: row.color || (row.val === null ? C.text : row.val >= 0 ? C.text : C.red) }}>
+                    {row.display || (row.val === null ? "-" : (row.val >= 0 ? "" : "-") + fmt(Math.abs(row.val)))}
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// --- DASHBOARD --------------------------------------------------------------
+function Dashboard({ skuNames }) {
+  return (
+    <div>
+      <h2 style={{ fontSize: 15, fontWeight: 600, marginBottom: 4, fontFamily: FONT_MONO, letterSpacing: "0.04em", color: C.text }}>Summary Dashboard</h2>
+      <p style={{ fontSize: 12, color: C.textMuted, fontFamily: FONT_MONO, marginBottom: 24 }}>Ringkasan semua modul dalam satu tampilan.</p>
+      <div style={styles.grid3}>
+        {["Business Canvas", "Demand Forecast", "BCG Matrix", "Ad Performance", "Unit Economics", "Cashflow Simulator"].map((name) => (
+          <div key={name} style={{ ...styles.kpiBox, textAlign: "center" }}>
+            <div style={{ fontSize: 20, marginBottom: 8, fontFamily: FONT_MONO, color: C.textMuted }}>
+              {name === "Business Canvas" ? "-" : name === "Demand Forecast" ? "-" : name === "BCG Matrix" ? "-" : name === "Ad Performance" ? "-" : name === "Unit Economics" ? "-" : "-"}
+            </div>
+            <div style={{ fontSize: 13, fontWeight: "bold", marginBottom: 4 }}>{name}</div>
+            <div style={{ fontSize: 11, color: C.textMuted, fontFamily: FONT_MONO }}>
+              {skuNames.length} SKU aktif
+            </div>
+          </div>
+        ))}
+      </div>
+      <div style={{ ...styles.card, marginTop: 20, textAlign: "center", padding: 32 }}>
+        <div style={{ fontSize: 16, fontWeight: "bold", color: C.accent, fontFamily: FONT_MONO, marginBottom: 8 }}>BRAND OS v2.0</div>
+        <div style={{ fontSize: 12, color: C.textMuted, fontFamily: FONT_MONO }}>
+          Enhanced Forecast × Cashflow Simulator × Revenue Projection<br />
+          Bill & Board Group - @hanif.mhu
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// ===========================================================================
+// --- APP ROOT --------------------------------------------------------------
+// ===========================================================================
+export default function App() {
+  useEffect(() => { injectFonts(); }, []);
+  const [unlocked, setUnlocked] = useState(() => sessionStorage.getItem("brandos_auth") === "1");
+  const [activeTab, setActiveTab] = useState(() => localStorage.getItem("brandos_tab") || TABS[0]);
+  const [skuNames, setSkuNames] = useState(["SKU 1", "SKU 2", "SKU 3", "SKU 4", "SKU 5"]);
+
+  const handleUnlock = () => { sessionStorage.setItem("brandos_auth", "1"); setUnlocked(true); };
+  const handleTabChange = (tab) => { setActiveTab(tab); localStorage.setItem("brandos_tab", tab); };
+
+  if (!unlocked) return <PasswordGate onUnlock={handleUnlock} />;
+
+  const renderTab = () => {
+    switch (activeTab) {
+      case "Canvas": return <BusinessCanvas />;
+      case "Business Plan": return <BusinessPlan />;
+      case "Demand Forecast": return <ForecastModule skuNames={skuNames} setSkuNames={setSkuNames} />;
+      case "Size Breakdown": return <SizeBreakdown skuNames={skuNames} />;
+      case "BCG Matrix": return <BCGMatrix skuNames={skuNames} />;
+      case "Ad Performance": return <AdPerformance skuNames={skuNames} />;
+      case "Product Tracker": return <ProductTracker skuNames={skuNames} />;
+      case "Unit Economics": return <UnitEconomics />;
+      case "Cashflow": return <CashflowSimulator skuNames={skuNames} />;
+      case "Dashboard": return <Dashboard skuNames={skuNames} />;
+      default: return null;
     }
   };
 
   return (
-    <div style={{minHeight:"100vh",background:C.bg,display:"flex",alignItems:"center",justifyContent:"center",fontFamily:"'DM Mono',monospace"}}>
-      <style>{`
-        @import url('https://fonts.googleapis.com/css2?family=DM+Mono:wght@300;400;500&family=Cormorant+Garamond:wght@400;600;700&display=swap');
-        *{box-sizing:border-box;margin:0;padding:0;}
-        input{color-scheme:dark;}
-        @keyframes shake {
-          0%,100%{transform:translateX(0)}
-          20%,60%{transform:translateX(-8px)}
-          40%,80%{transform:translateX(8px)}
-        }
-        @keyframes fadeIn {
-          from{opacity:0;transform:translateY(16px)}
-          to{opacity:1;transform:translateY(0)}
-        }
-      `}</style>
-      <div style={{width:"100%",maxWidth:380,padding:"0 24px",animation:"fadeIn 0.5s ease"}}>
-        {/* Logo */}
-        <div style={{textAlign:"center",marginBottom:40}}>
-          <div style={{fontSize:9,letterSpacing:"0.24em",textTransform:"uppercase",color:C.goldDim,marginBottom:8}}>Bill & Board Group</div>
-          <div style={{fontSize:32,fontFamily:"'Cormorant Garamond',serif",fontWeight:700,color:C.text,letterSpacing:"-0.02em"}}>Brand OS</div>
-          <div style={{fontSize:9,letterSpacing:"0.14em",color:C.dim,marginTop:4}}>v2.0 — Complete Business Toolkit</div>
+    <div style={styles.app}>
+      <div style={styles.header}>
+        <div style={styles.headerLogo}>
+          <div style={styles.headerTitle}>Brand OS</div>
+          <div style={styles.headerVersion}>v2.0</div>
         </div>
-
-        {/* Gate */}
-        <div style={{background:C.s1,border:`1px solid ${C.border2}`,borderRadius:3,padding:"28px 24px",animation:shake?"shake 0.4s ease":"none"}}>
-          <div style={{fontSize:10,letterSpacing:"0.16em",textTransform:"uppercase",color:C.mid,marginBottom:16,textAlign:"center"}}>Masukkan Access Password</div>
-          <input
-            type="password"
-            value={input}
-            onChange={e=>{setInput(e.target.value);setError(false);}}
-            onKeyDown={e=>e.key==="Enter"&&attempt()}
-            placeholder="••••••••••"
-            autoFocus
-            style={{width:"100%",background:C.s2,border:`1px solid ${error?C.red:C.border2}`,borderRadius:2,padding:"12px 14px",color:C.text,fontFamily:"'DM Mono',monospace",fontSize:16,outline:"none",textAlign:"center",letterSpacing:"0.2em",marginBottom:error?8:16,transition:"border-color 0.2s"}}
-          />
-          {error && <div style={{fontSize:11,color:C.red,textAlign:"center",marginBottom:12,letterSpacing:"0.1em"}}>Password salah. Coba lagi.</div>}
-          <button onClick={attempt} style={{width:"100%",padding:"13px",background:C.gold,border:"none",borderRadius:2,color:"#0b0a08",fontSize:11,letterSpacing:"0.18em",textTransform:"uppercase",fontFamily:"'DM Mono',monospace",cursor:"pointer",fontWeight:700}}>
-            Masuk →
-          </button>
-        </div>
-
-        <div style={{textAlign:"center",marginTop:20,fontSize:10,color:C.dim,lineHeight:1.6}}>
-          Belum punya password?<br/>
-          <span style={{color:C.goldDim}}>Beli di Lynk.id untuk dapat akses</span>
-        </div>
+        <div style={styles.headerSub}>Bill & Board Group - Business Intelligence Suite</div>
       </div>
-    </div>
-  );
-}
-
-// ─── MAIN APP ─────────────────────────────────────────────────────────────────
-const TABS = [
-  {id:"canvas",    label:"Canvas",     num:"01"},
-  {id:"plan",      label:"Plan",       num:"02"},
-  {id:"forecast",  label:"Forecast",   num:"03"},
-  {id:"size",      label:"Size Break", num:"04"},
-  {id:"bcg",       label:"BCG Matrix", num:"05"},
-  {id:"adperf",    label:"Ad Perf",    num:"06"},
-  {id:"tracker",   label:"Tracker",    num:"07"},
-  {id:"economics", label:"Unit Econ",  num:"08"},
-  {id:"dashboard", label:"Dashboard",  num:"09"},
-];
-
-export default function App() {
-  const [tab, setTab] = useState("canvas");
-  const [unlocked, setUnlocked] = useState(() => {
-    try { return localStorage.getItem("brandos_auth") === "1"; } catch { return false; }
-  });
-
-  if (!unlocked) return <PasswordGate onUnlock={() => setUnlocked(true)} />;
-  return (
-    <div style={{minHeight:"100vh",background:C.bg,color:C.text}}>
-      <style>{`
-        @import url('https://fonts.googleapis.com/css2?family=DM+Mono:wght@300;400;500&family=Cormorant+Garamond:wght@400;600;700&display=swap');
-        *{box-sizing:border-box;margin:0;padding:0;}
-        input,textarea,select{color-scheme:light;}
-        input::placeholder,textarea::placeholder{color:#c4bbb0;}
-        ::-webkit-scrollbar{width:3px;height:3px;}
-        ::-webkit-scrollbar-track{background:${C.bg};}
-        ::-webkit-scrollbar-thumb{background:${C.goldDim};border-radius:3px;}
-        input[type=number]::-webkit-outer-spin-button,
-        input[type=number]::-webkit-inner-spin-button{-webkit-appearance:none;}
-      `}</style>
-
-      {/* Header */}
-      <div style={{borderBottom:`1px solid ${C.border}`,padding:"14px 32px",display:"flex",alignItems:"center",justifyContent:"space-between",background:C.s1,position:"sticky",top:0,zIndex:100}}>
-        <div style={{display:"flex",alignItems:"baseline",gap:14}}>
-          <span style={{fontSize:9,letterSpacing:"0.22em",textTransform:"uppercase",color:C.goldDim,fontFamily:"'DM Mono',monospace"}}>Bill & Board</span>
-          <span style={{fontSize:18,fontFamily:"'Cormorant Garamond',serif",fontWeight:700,color:C.text}}>Brand OS</span>
-          <span style={{fontSize:9,letterSpacing:"0.14em",color:C.dim,fontFamily:"'DM Mono',monospace"}}>v2.0</span>
-        </div>
-        <div style={{display:"flex",alignItems:"center",gap:16}}>
-          <button onClick={()=>{if(window.confirm("Reset semua data? Tidak bisa di-undo.")){Object.keys(localStorage).filter(k=>k.startsWith("brandos_")).forEach(k=>localStorage.removeItem(k));window.location.reload();}}} style={{background:"transparent",border:`1px solid ${C.border2}`,color:C.dim,fontFamily:"'DM Mono',monospace",fontSize:9,letterSpacing:"0.12em",padding:"4px 10px",cursor:"pointer",borderRadius:2}}>RESET DATA</button>
-          <div style={{display:"flex",gap:4}}>
-            {TABS.map(t=>(
-              <div key={t.id} style={{width:5,height:5,borderRadius:"50%",background:tab===t.id?C.gold:C.border2}}/>
-            ))}
+      <nav style={styles.nav}>
+        {TABS.map((tab) => (
+          <div key={tab} style={styles.navItem(activeTab === tab)} onClick={() => handleTabChange(tab)}>
+            {tab === "Cashflow Simulator" ? tab : tab}
           </div>
-        </div>
-      </div>
-
-      {/* Tabs */}
-      <div style={{display:"flex",borderBottom:`1px solid ${C.border}`,background:C.s1,padding:"0 32px",overflowX:"auto"}}>
-        {TABS.map(t=>(
-          <button key={t.id} onClick={()=>setTab(t.id)} style={{padding:"11px 16px",background:"none",border:"none",cursor:"pointer",fontSize:10,letterSpacing:"0.14em",textTransform:"uppercase",fontFamily:"'DM Mono',monospace",color:tab===t.id?C.gold:C.dim,borderBottom:tab===t.id?`1px solid ${C.gold}`:"1px solid transparent",marginBottom:-1,whiteSpace:"nowrap",display:"flex",alignItems:"center",gap:7}}>
-            <span style={{color:tab===t.id?C.goldDim:C.dim,fontSize:9}}>{t.num}</span>{t.label}
-          </button>
         ))}
-      </div>
-
-      {/* Content — keep all mounted, hide inactive tabs */}
-      <div style={{padding:"28px 32px",maxWidth:1400,margin:"0 auto"}}>
-        <div style={{display:tab==="canvas"?"block":"none"}}><CanvasModule/></div>
-        <div style={{display:tab==="plan"?"block":"none"}}><PlanModule/></div>
-        <div style={{display:tab==="forecast"?"block":"none"}}><ForecastModule/></div>
-        <div style={{display:tab==="size"?"block":"none"}}><SizeModule/></div>
-        <div style={{display:tab==="bcg"?"block":"none"}}><BCGModule/></div>
-        <div style={{display:tab==="adperf"?"block":"none"}}><AdPerfModule/></div>
-        <div style={{display:tab==="tracker"?"block":"none"}}><ProdTrackModule/></div>
-        <div style={{display:tab==="economics"?"block":"none"}}><UnitEconModule/></div>
-        <div style={{display:tab==="dashboard"?"block":"none"}}><DashboardModule/></div>
-      </div>
+      </nav>
+      <div style={styles.content}>{renderTab()}</div>
     </div>
   );
 }
