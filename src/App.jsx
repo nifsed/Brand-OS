@@ -911,48 +911,126 @@ function ForecastModule({ skuNames, setSkuNames }) {
           </table>
         </div>
 
-        {/* Diagnosa Per SKU - category-aware */}
+        {/* Diagnosa Per SKU - category-aware, detail */}
         <div style={{ marginTop: 20 }}>
-          <div style={{ fontSize: 12, fontFamily: FONT_MONO, fontWeight: "bold", color: C.text, marginBottom: 10 }}> Diagnosa & Saran Per SKU:</div>
+          <div style={{ fontSize: 12, fontFamily: FONT_MONO, fontWeight: "bold", color: C.text, marginBottom: 10 }}>Diagnosa & Saran Per SKU:</div>
           {skus.map((sku, i) => {
             const c = skuCalcs[i];
             const cat = getCategoryConfig(sku.category);
-            const trendTxt = c.trend > 10 ? `Tren naik ${c.trend.toFixed(0)}% - validasi bagus untuk pertimbangkan buffer lebih tinggi.`
-              : c.trend < -10 ? `Tren turun ${Math.abs(c.trend).toFixed(0)}% - pertimbangkan turunkan kategori jika berlanjut.`
-              : "";
+            const hist = sku.hist || [0,0,0];
+            const trendUp = c.trend > 10;
+            const trendDown = c.trend < -10;
+            const trendFlat = !trendUp && !trendDown;
+            const stockValueAtCost = sku.currentStock * sku.cogs;
+            const stockValueAtRetail = sku.currentStock * sku.price;
+            const potentialRevNextMonth = Math.round(c.adjustedSales) * sku.price;
+            const daysLabel = c.daysOfStock < 900 ? `${c.daysOfStock.toFixed(0)} hari` : "∞";
+            const orderDeadline = (() => {
+              const d = new Date(); d.setDate(d.getDate() + Math.max(1, remainingDaysMonth - sku.leadDays));
+              return d.toLocaleDateString("id-ID");
+            })();
 
-            // Stock action message
-            const stockMsg = {
-              critical: `Stok ${sku.name} KRITIS (${sku.currentStock} unit, sisa ${c.daysOfStock.toFixed(0)} hari). SEGERA buat PO minimal ${c.restock} unit.`,
-              low: `Stok ${sku.name} mendekati reorder point (${Math.round(c.reorderPoint)} unit). Mulai proses pembelian sekarang - lead time ${sku.leadDays} hari.`,
-              overstock: `${sku.name} overstock - kelebihan +/-${Math.round(c.excessStock)} unit (${c.daysOfStock.toFixed(0)} hari). Tahan restock, dorong penjualan via promo.`,
-              deadstock_risk: `${sku.name} deadstock - ${c.daysOfStock < 900 ? c.daysOfStock.toFixed(0)+" hari" : "stok stagnan"}. Jalankan flash sale atau bundling segera.`,
-              ok: null,
-            }[c.stockStatus];
+            // Build diagnosa items: array of { type, title, body }
+            const items = [];
+
+            // 1. Status stok utama - detail dengan angka
+            if (c.stockStatus === "critical") {
+              items.push({ type: "red", title: "STOK KRITIS - Aksi Hari Ini",
+                body: `Sisa ${sku.currentStock} unit (${daysLabel}). Safety stock minimum: ${Math.round(c.safetyStock)} unit. Gap: ${Math.round(c.safetyStock - sku.currentStock)} unit shortfall. Lead time ${sku.leadDays} hari — jika PO tidak dikirim hari ini, risiko stockout sebelum barang tiba. PO minimum: ${c.restock} unit (${fmt(c.restockCost)}). Deadline order: ${orderDeadline}.` });
+              items.push({ type: "red", title: "Dampak ke Iklan",
+                body: `Tahan atau kurangi budget iklan drastis (turun 70-80%). Iklan saat stok kritis menarik pembeli tapi tidak bisa fulfill — merusak rating toko dan conversion rate jangka panjang. Prioritas: PO dulu, iklan kemudian.` });
+            } else if (c.stockStatus === "low") {
+              const daysUntilStockout = Math.round(c.daysOfStock);
+              const poDeadlineDays = Math.max(0, daysUntilStockout - sku.leadDays);
+              items.push({ type: "yellow", title: "Stok Menipis - Segera Proses PO",
+                body: `${sku.currentStock} unit tersisa (${daysLabel} stok efektif). Reorder point: ${Math.round(c.reorderPoint)} unit. Kamu punya ~${poDeadlineDays} hari sebelum harus order agar barang tiba tepat waktu (lead time ${sku.leadDays} hari). PO yang direkomendasikan: ${c.restock} unit (${fmt(c.restockCost)}) — order paling lambat ${orderDeadline}.` });
+              items.push({ type: "yellow", title: "Strategi Iklan Saat Stok Terbatas",
+                body: `Kurangi budget harian 30-40% untuk memperlambat penjualan dan memperpanjang runway stok. Jangan pause total — ranking produk di marketplace akan turun jika tidak ada aktivitas. Target: pertahankan penjualan ~${Math.round(c.dailySales * 0.6)}/hari sampai restock masuk.` });
+            } else if (c.stockStatus === "overstock" || c.stockStatus === "deadstock_risk") {
+              const excessDays = Math.round(c.daysOfStock);
+              const excessUnits = Math.max(0, Math.round(c.excessStock));
+              const liquidate65 = Math.round(sku.currentStock * sku.price * 0.65);
+              items.push({ type: "yellow", title: `Stok Berlebih - ${excessDays} Hari Runway`,
+                body: `${sku.currentStock} unit tersisa, estimasi habis dalam ${excessDays} hari dengan pace saat ini (${c.dailySales.toFixed(1)}/hari). Kelebihan vs kebutuhan bulan depan: ~${excessUnits} unit. Nilai stok tertahan: ${fmt(stockValueAtCost)} at cost (${fmt(stockValueAtRetail)} retail). Tahan semua restock sampai DOS < 45 hari.` });
+              items.push({ type: "yellow", title: "Plan Likuidasi Bertahap",
+                body: `Opsi 1: Flash voucher 5-10% selama 7 hari — target habiskan ${Math.round(excessUnits * 0.4)} unit. Opsi 2: Bundle dengan SKU lain yang Best Seller. Opsi 3: Turunkan harga 15-20% jika tidak respons setelah 14 hari. Nilai likuidasi darurat (65% harga): ${fmt(liquidate65)}. Jika tidak bergerak 30 hari = clearance agresif.` });
+              if (c.stockStatus === "deadstock_risk") {
+                items.push({ type: "red", title: "Risiko Deadstock Tinggi",
+                  body: `DIO sudah di atas 90 hari. Modal ${fmt(stockValueAtCost)} tidak berputar — setiap hari = opportunity cost. Redirect iklan berbayar ke SKU lain yang perform lebih baik. Untuk SKU ini: fokus organic (flash sale toko, bundle), tanpa tambahan cost iklan.` });
+              }
+            } else if (c.stockStatus === "ok") {
+              items.push({ type: "positive", title: "Stok On Track",
+                body: `${sku.currentStock} unit (${daysLabel} stok efektif). Reorder point: ${Math.round(c.reorderPoint)} unit — buffer aman. ${c.restock > 0 ? `PO ${c.restock} unit (${fmt(c.restockCost)}) direkomendasikan untuk bulan depan — mulai proses sebelum ${orderDeadline}.` : "Tidak perlu restock bulan ini."}` });
+            }
+
+            // 2. Analisa tren — lebih actionable
+            if (trendDown && c.stockStatus !== "critical") {
+              const dropPct = Math.abs(c.trend).toFixed(0);
+              items.push({ type: "yellow", title: `Tren Turun ${dropPct}% dalam 3 Bulan`,
+                body: `Penjualan: ${hist[0]} → ${hist[1]} → ${hist[2]} unit. Penurunan konsisten ${dropPct}% perlu dievaluasi. Cek: (1) apakah ada kompetitor baru dengan harga lebih murah? (2) foto/deskripsi sudah diperbarui? (3) rating toko turun? Jika tidak ada perubahan setelah evaluasi & intervensi dalam 2 minggu, pertimbangkan turunkan kategori ke level di bawahnya.` });
+            } else if (trendUp) {
+              const upPct = c.trend.toFixed(0);
+              items.push({ type: "positive", title: `Tren Naik ${upPct}% — Momentum Bagus`,
+                body: `Penjualan: ${hist[0]} → ${hist[1]} → ${hist[2]} unit. Tren positif adalah sinyal valid untuk mulai scale. ${cat.value === "potential" || cat.value === "slow_moving" ? `Pertimbangkan naikkan kategori ke level berikutnya dan tambah buffer stok. Uji kenaikan budget iklan 20% selama 5 hari — jika ROAS stabil, lanjutkan.` : `Jaga momentum — pastikan stok aman, jangan sampai spike permintaan tidak bisa difulfill.`}` });
+            } else if (trendFlat && (cat.value === "slow_moving" || cat.value === "potential")) {
+              items.push({ type: "yellow", title: "Tren Flat — Butuh Intervensi",
+                body: `Penjualan relatif stagnan: ${hist[0]} → ${hist[1]} → ${hist[2]} unit. Untuk SKU ${cat.label}, flat artinya belum terbukti punya momentum naik. Coba satu iterasi tajam dulu: test foto baru ATAU turunkan harga 5% ATAU flash voucher 7 hari. Ukur hasilnya sebelum tambah investasi stok.` });
+            }
+
+            // 3. Category-specific deep advice
+            items.push({ type: "accent", title: `Panduan Kategori: ${cat.label}`, body: cat.advice });
+
+            // 4. Double date warning (jika ada)
+            if (c.ddWarning) {
+              items.push({ type: "yellow", title: `Double Date ${currentMonthNum}/${currentMonthNum} Mendekat`,
+                body: `Estimasi spike double date: +${Math.round(c.ddSpike)} unit. Stok kamu mungkin tidak cukup menanggung lonjakan ini. Siapkan flash voucher 24 jam, pastikan stok tidak habis di tengah event. Jika stok tidak cukup, pertimbangkan tidak ikut promo double date untuk SKU ini.` });
+            }
+
+            // 5. Finance note jika ada nilai stok signifikan
+            if (stockValueAtCost > 5000000 && (c.stockStatus === "overstock" || c.stockStatus === "deadstock_risk" || c.stockStatus === "ok")) {
+              items.push({ type: "accent", title: "Posisi Aset Stok",
+                body: `Nilai inventori ${sku.name}: ${fmt(stockValueAtCost)} at cost / ${fmt(stockValueAtRetail)} retail. Proyeksi revenue bulan depan dari SKU ini (dengan seasonality): ${fmt(potentialRevNextMonth)}. Gunakan angka ini saat mengkalkulasi kebutuhan modal di tab Cashflow.` });
+            }
+
+            const headerAlertType = c.stockStatus === "critical" || c.stockStatus === "deadstock_risk" ? C.negative
+              : c.stockStatus === "low" || c.stockStatus === "overstock" ? C.warning : C.positive;
 
             return (
-              <div key={i} style={{ marginBottom: 12, border: `1px solid ${cat.color}30`, borderRadius: 3, overflow: "hidden" }}>
-                {/* Category header */}
-                <div style={{ background: cat.color + "15", borderBottom: `1px solid ${cat.color}30`, padding: "8px 14px", display: "flex", alignItems: "center", gap: 8 }}>
-                  <span style={{ fontSize: 13, fontWeight: "bold", color: cat.color }}>{cat.label}</span>
-                  <span style={{ fontSize: 13, fontWeight: "bold", color: C.text }}>- {sku.name}</span>
-                  {trendTxt && <span style={{ fontSize: 11, fontFamily: FONT_MONO, color: c.trend > 0 ? C.green : C.red, marginLeft: "auto" }}>{c.trend > 0 ? "▲" : "▼"} {Math.abs(c.trend).toFixed(0)}% trend</span>}
+              <div key={i} style={{ marginBottom: 14, border: `1px solid ${cat.color}25`, borderRadius: 4, overflow: "hidden" }}>
+                {/* Header */}
+                <div style={{ background: cat.color + "12", borderBottom: `1px solid ${cat.color}25`, padding: "10px 14px", display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap" }}>
+                  <span style={{ fontFamily: FONT_MONO, fontSize: 10, fontWeight: "bold", color: cat.color, textTransform: "uppercase", letterSpacing: "0.1em" }}>{cat.label}</span>
+                  <span style={{ fontSize: 13, fontWeight: "bold", color: C.text }}>— {sku.name}</span>
+                  <span style={{ fontSize: 11, fontFamily: FONT_MONO, color: C.textMuted }}>
+                    {sku.currentStock} unit · {daysLabel} · {c.dailySales.toFixed(1)}/hari
+                  </span>
+                  <span style={{ marginLeft: "auto", fontSize: 11, fontFamily: FONT_MONO, fontWeight: "bold",
+                    color: statusColor[c.stockStatus] }}>
+                    {statusLabel[c.stockStatus]}
+                  </span>
+                  {c.trend !== 0 && (
+                    <span style={{ fontSize: 11, fontFamily: FONT_MONO, color: trendUp ? C.positive : trendDown ? C.negative : C.textMuted }}>
+                      {trendUp ? "▲" : "▼"} {Math.abs(c.trend).toFixed(0)}%
+                    </span>
+                  )}
                 </div>
-                <div style={{ padding: "10px 14px" }}>
-                  {/* Stock action */}
-                  {stockMsg && (
-                    <div style={{ ...styles.alert(c.stockStatus === "critical" || c.stockStatus === "deadstock_risk" ? "red" : "yellow"), marginBottom: 8 }}>
-                      {stockMsg}
-                    </div>
-                  )}
-                  {/* Category advice */}
-                  <div style={{ fontSize: 12, fontFamily: FONT_MONO, color: C.text, lineHeight: 1.6, padding: "8px 12px", background: cat.color + "08", borderRadius: 4, borderLeft: `2px solid ${cat.color}` }}>
-                    <span style={{ fontWeight: "bold", color: cat.color }}>Saran ({cat.label}): </span>{cat.advice}
-                  </div>
-                  {/* Trend context */}
-                  {trendTxt && (
-                    <div style={{ fontSize: 11, fontFamily: FONT_MONO, color: C.textMuted, marginTop: 6 }}>{trendTxt}</div>
-                  )}
+                <div style={{ padding: "10px 14px", display: "flex", flexDirection: "column", gap: 6 }}>
+                  {items.map((item, j) => {
+                    const isAccent = item.type === "accent";
+                    const bgMap = { red: C.negativeLight, yellow: C.warningLight, positive: C.positiveLight, accent: C.accentLight };
+                    const colorMap = { red: C.negative, yellow: C.warning, positive: C.positive, accent: C.accent };
+                    const borderMap = { red: C.negativeDim, yellow: C.warningDim, positive: C.positiveDim, accent: C.accentDim };
+                    return (
+                      <div key={j} style={{ padding: "9px 12px", borderRadius: 3, background: bgMap[item.type] || C.accentLight, borderLeft: `3px solid ${colorMap[item.type] || C.accent}` }}>
+                        <div style={{ fontSize: 11, fontWeight: "bold", fontFamily: FONT_MONO, color: colorMap[item.type] || C.accent, marginBottom: 4, letterSpacing: "0.04em" }}>
+                          {item.title}
+                        </div>
+                        <div style={{ fontSize: 11.5, fontFamily: FONT_MONO, color: C.text, lineHeight: 1.65 }}>
+                          {item.body}
+                        </div>
+                      </div>
+                    );
+                  })}
                 </div>
               </div>
             );
@@ -1688,55 +1766,61 @@ function BCGMatrix({ skuNames }) {
 
           // -- Saran berdasarkan kombinasi BCG + trend + kategori forecast --
           const sarans = [];
+          const stockVal = fmt(row.currentStock * (forecastSkusRaw.find(f=>f.name===row.name)?.cogs || 0));
+          const retailVal = fmt(row.currentStock * row.price);
+          const monthlyRev = fmt(row.revenue);
+          const revAtRisk = totalRev > 0 ? `(${revShare.toFixed(1)}% dari total revenue brand)` : "";
+          const dioNum = row.adjustedSales > 0 ? row.currentStock / (row.adjustedSales / 30) : 999;
 
           if (bcg.label.includes("Star")) {
-            sarans.push({ type: "green", icon: "", title: "Star - Maksimalkan & Jaga",
-              body: "Ini produk terbaik kamu sekarang. Pastikan lini produksi stabil dan stok tidak pernah kosong. Agresifkan paid ads - ROAS di channel ini harus dimonitor ketat agar tidak drop saat scaling. Optimalkan juga organic: konten review, foto lifestyle, dan SEO toko." });
-            if (trendDown) sarans.push({ type: "yellow", icon: "", title: "Star tapi tren turun",
-              body: `Penjualan turun ${Math.abs(row.trend).toFixed(0)}% dalam 3 bulan. Star yang trendnya turun bisa jatuh ke Cash Cow atau bahkan Question Mark. Evaluasi: apakah ada kompetitor baru, perubahan harga, atau fatigue iklan? Lakukan refresh kreatif dan cek harga kompetitor sebelum terlambat.` });
-            if (revShare > 40) sarans.push({ type: "yellow", icon: "", title: "Konsentrasi revenue terlalu tinggi",
-              body: `${row.name} menyumbang ${revShare.toFixed(0)}% total revenue. Terlalu bergantung pada satu SKU adalah risiko - jika tiba-tiba drop, cashflow terganggu. Mulai develop SKU lain sebagai backup revenue.` });
+            sarans.push({ type: "green", icon: "", title: "Star — Mesin Revenue Utama",
+              body: `${row.name} menyumbang ${revShare.toFixed(1)}% total revenue (${monthlyRev}/bln). Ini produk terpenting sekarang — stockout di SKU ini = kehilangan ${revAtRisk} revenue per bulan. Prioritas: (1) Pastikan PO berjalan konsisten. (2) Scale paid ads 20% per 3 hari jika ROAS stabil. (3) Optimalkan organic: foto lifestyle baru, update deskripsi, balas ulasan aktif. (4) Jangan andalkan 1 supplier saja — validasi backup supplier.` });
+            if (trendDown) sarans.push({ type: "yellow", icon: "", title: `Star Tapi Tren Turun ${Math.abs(row.trend).toFixed(0)}%`,
+              body: `Penjualan turun dari ${row.hist[0]} → ${row.hist[1]} → ${row.hist[2]} unit. Star dengan tren turun adalah early warning — kalau dibiarkan bisa jatuh ke Cash Cow atau Question Mark dalam 2-3 bulan. Audit segera: (1) Cek harga vs 3 kompetitor terdekat. (2) Lihat review 30 hari terakhir — ada pola komplain? (3) Apakah ada fatigue iklan? (4) Refresh kreatif minimal 1 variasi baru minggu ini.` });
+            if (revShare > 40) sarans.push({ type: "yellow", icon: "", title: "Konsentrasi Revenue Terlalu Tinggi",
+              body: `${row.name} menanggung ${revShare.toFixed(0)}% revenue — terlalu bergantung pada satu SKU adalah risiko sistemik. Jika ${row.name} drop 50%, revenue brand langsung turun ${(revShare * 0.5).toFixed(0)}%. Mulai invest sekarang untuk develop SKU lain sebagai revenue diversification, idealnya ada minimal 2 SKU yang bisa naik jadi Star.` });
           }
 
           if (bcg.label.includes("Cash Cow")) {
-            sarans.push({ type: "green", icon: "", title: "Cash Cow - Jaga Flow, Jangan Over-Invest",
-              body: "DIO bagus, tapi revenue share belum cukup besar untuk jadi Star. Jaga konsistensi stok dan optimalkan organic - foto, ulasan, dan SEO toko. Paid ads boleh tapi efisiensi dulu sebelum scale. Gunakan cashflow dari produk ini untuk fund pengembangan SKU berpotensi." });
-            if (trendDown) sarans.push({ type: "yellow", icon: "", title: "Cash Cow tren turun - mulai geser prioritas",
-              body: `Penjualan turun ${Math.abs(row.trend).toFixed(0)}% - Cash Cow yang trendnya terus turun akan jadi Question Mark. Evaluasi apakah worth dipertahankan atau mulai geser alokasi iklan dan stok ke SKU yang sedang naik.` });
+            sarans.push({ type: "green", icon: "", title: "Cash Cow — Jaga Flow, Efisienkan Cost",
+              body: `DIO ${dioNum.toFixed(0)} hari — perputaran stok sehat. Revenue ${monthlyRev}/bln ${revAtRisk}. Strategi: (1) Jangan over-invest di iklan berbayar — ROAS Cash Cow sering stagnan saat di-scale. (2) Fokus optimalkan organic: foto, ulasan, SEO toko. (3) Gunakan cashflow dari SKU ini untuk fund pengembangan SKU yang Potential. (4) Maintain stok konsisten — jangan sampai stockout karena dianggap "aman".` });
+            if (trendDown) sarans.push({ type: "yellow", icon: "", title: `Cash Cow Tren Turun ${Math.abs(row.trend).toFixed(0)}% — Waspada`,
+              body: `Cash Cow yang trendnya terus turun akan bergerak ke Question Mark. Penjualan: ${row.hist[0]} → ${row.hist[1]} → ${row.hist[2]} unit. Evaluasi apakah ada alasan struktural (kompetitor kuat masuk, perubahan tren pasar) atau operasional (foto lama, harga tidak kompetitif). Jika alasan struktural, mulai geser alokasi bertahap ke SKU yang sedang naik.` });
           }
 
           if (bcg.label.includes("Question Mark")) {
             if (trendUp) {
-              sarans.push({ type: "green", icon: "", title: "Question Mark tapi tren naik - kandidat Star",
-                body: `Penjualan naik ${row.trend.toFixed(0)}% dalam 3 bulan. Ini sinyal valid untuk mulai naikkan investasi. Tambah buffer stok, uji scale iklan 20-30%, dan pantau ROAS ketat. Jika tren bertahan 2 bulan ke depan, shift kategori ke Potential atau Best Seller.` });
+              sarans.push({ type: "green", icon: "", title: `Question Mark Tren Naik ${row.trend.toFixed(0)}% — Kandidat Naik Kelas`,
+                body: `Penjualan: ${row.hist[0]} → ${row.hist[1]} → ${row.hist[2]} unit — momentum positif. Ini adalah sinyal untuk mulai investasi terukur: (1) Tambah buffer stok 20-30% dari level saat ini. (2) Test scale budget iklan 20% selama 5 hari — monitor ROAS harian. (3) Jika tren naik bertahan 6-8 minggu lagi, naikkan kategori ke Potential atau Best Seller di tab Demand Forecast. (4) Revenue saat ini ${monthlyRev}/bln — target double dalam 2 bulan dengan momentum ini.` });
             } else if (trendDown) {
-              sarans.push({ type: "red", icon: "", title: "Question Mark + tren turun - evaluasi exit",
-                body: `Penjualan turun ${Math.abs(row.trend).toFixed(0)}% dan kontribusi revenue rendah. Jangan tambah stok. Tahan iklan kecuali ada perubahan signifikan (harga, foto, bundling). Jika tidak ada perbaikan dalam 30 hari, pertimbangkan clearance dan realokasi modal ke SKU yang lebih proven.` });
+              sarans.push({ type: "red", icon: "", title: `Question Mark + Tren Turun ${Math.abs(row.trend).toFixed(0)}% — Evaluasi Exit`,
+                body: `Kombinasi berbahaya: kontribusi revenue rendah (${revShare.toFixed(1)}%) + penjualan turun ${Math.abs(row.trend).toFixed(0)}%. Penjualan: ${row.hist[0]} → ${row.hist[1]} → ${row.hist[2]} unit. Jangan tambah stok. Berikan satu kesempatan terakhir: test foto baru + voucher 5-10% selama 7 hari. Jika tidak ada pergerakan signifikan setelah itu — clearance dan realokasi modal ke SKU yang proven. Nilai stok at cost yang bisa direcovery: ${stockVal}.` });
             } else {
-              sarans.push({ type: "yellow", icon: "", title: "Question Mark - butuh validasi lebih",
-                body: "Penjualan flat dan kontribusi revenue belum signifikan. Lakukan satu iterasi tajam: test foto baru, turunkan harga 5-10%, atau coba flash voucher selama 7 hari. Ukur hasilnya - naik berarti ada potensi, flat/turun berarti pertimbangkan exit." });
+              sarans.push({ type: "yellow", icon: "", title: "Question Mark — Butuh Satu Iterasi Tajam",
+                body: `Penjualan flat: ${row.hist[0]} → ${row.hist[1]} → ${row.hist[2]} unit. Potensi ada tapi belum terbukti. Pilih SATU intervensi dan ukur hasilnya: Opsi A: Test foto lifestyle baru (tanpa biaya tambahan). Opsi B: Turunkan harga 5-8% selama 14 hari. Opsi C: Flash voucher toko 7 hari. Jangan lakukan semua sekaligus — kalau naik, kamu tidak tahu mana yang bekerja. Beri 14 hari, ukur hasilnya, baru putuskan.` });
             }
           }
 
           if (bcg.label.includes("Slow Mover")) {
-            sarans.push({ type: "yellow", icon: "", title: "Slow Mover - Hati-hati DIO Tinggi",
-              body: `DIO ${dio.toFixed(0)} hari - stok bergerak lambat, modal tertahan. Sebelum restock, coba dorong penjualan dulu: voucher toko, bundle dengan Best Seller, atau flash sale 3 hari. Jika setelah intervensi tidak ada pergerakan signifikan, kurangi stok ke level minimum dan hold restock.` });
-            if (trendDown) sarans.push({ type: "red", icon: "", title: "Slow Mover + tren turun - risiko deadstock",
-              body: `Kombinasi berbahaya: DIO tinggi + penjualan turun ${Math.abs(row.trend).toFixed(0)}%. Tanpa aksi agresif, ini akan jadi deadstock dalam waktu dekat. Prioritaskan clearance sekarang - diskon, bundle, atau tawarkan ke reseller dengan margin lebih rendah daripada modal tertahan.` });
+            sarans.push({ type: "yellow", icon: "", title: `Slow Mover — DIO ${dioNum.toFixed(0)} Hari, Modal Tertahan`,
+              body: `Stok ${row.currentStock} unit (DIO ${dioNum.toFixed(0)} hari). Nilai modal tertahan: ${stockVal} at cost. Sebelum restock apapun, dorong penjualan dulu: (1) Flash voucher toko selama 7 hari — target habiskan ${Math.round(row.currentStock * 0.3)} unit. (2) Bundle wajib dengan SKU Best Seller. (3) Turunkan harga 5% jika tidak ada respons setelah 10 hari. Target: bawa DIO ke bawah 45 hari sebelum pertimbangkan restock.` });
+            if (trendDown) sarans.push({ type: "red", icon: "", title: "Slow Mover + Tren Turun — Risiko Deadstock Imminent",
+              body: `DIO tinggi PLUS penjualan turun ${Math.abs(row.trend).toFixed(0)}% — ini adalah kombinasi terburuk. Tanpa aksi agresif sekarang, SKU ini akan masuk Deadstock dalam 4-6 minggu. Aksi prioritas: (1) Flash sale segera dengan diskon 15-20%. (2) Tawarkan ke reseller/wholesaler dengan margin lebih rendah. (3) Stop semua iklan berbayar — redirect ke SKU yang lebih perform. Modal ${stockVal} harus diselamatkan sebelum terlambat.` });
           }
 
           if (bcg.label.includes("Deadstock")) {
-            sarans.push({ type: "red", icon: "", title: "Deadstock - Prioritas Habiskan Modal",
-              body: `DIO ${dio.toFixed(0)} hari - modal nyangkut dan tidak berputar. Hentikan semua restock. Fokus 100% habiskan stok existing: flash sale agresif, bundle wajib dengan SKU lain, atau tawarkan ke wholesaler/reseller dengan harga di atas COGS. Setiap hari yang lewat = biaya opportunity cost yang tidak perlu.` });
-            if (revShare > 15) sarans.push({ type: "red", icon: "", title: "Deadstock menyumbang revenue besar - hati-hati",
-              body: `${row.name} masih contribute ${revShare.toFixed(0)}% revenue meski DIO tinggi - ini berarti penjualannya masih ada tapi stok terlalu besar. Turunkan stok ke level yang sehat (DIO < 45 hari) dan jangan restock sampai rasio ini normal.` });
+            sarans.push({ type: "red", icon: "", title: "Deadstock — Recovery Modal Jadi Prioritas",
+              body: `DIO ${dioNum.toFixed(0)} hari. Modal tertahan: ${stockVal} at cost (${retailVal} retail). Setiap hari = opportunity cost modal yang harusnya berputar. Langkah wajib: (1) Hentikan SEMUA restock dan iklan berbayar. (2) Flash sale agresif — diskon 20-30%, harga floor = di atas COGS. (3) Bundle paksa dengan Best Seller — buat paket bundling dengan harga menarik. (4) Tawarkan ke reseller dengan margin rendah tapi modal kembali. (5) Jika dalam 30 hari tidak ada pergerakan, pertimbangkan clearance di bawah COGS untuk bebaskan modal.` });
+            if (revShare > 15) sarans.push({ type: "yellow", icon: "", title: "Deadstock Tapi Masih Contribute Revenue",
+              body: `${row.name} masih menyumbang ${revShare.toFixed(0)}% revenue (${monthlyRev}/bln) meski DIO tinggi. Artinya produk masih terjual tapi stok terlalu besar relatif terhadap kecepatan jualnya. Strategi: jangan clearance total — cukup kurangi stok ke level yang DIO-nya di bawah 45 hari. Hitung: DIO 45 hari dengan sales ${Math.round(row.adjustedSales/30)}/hari = butuh sekitar ${Math.round((row.adjustedSales/30)*45)} unit. Sisa di atas itu = yang harus dilikuidasi.` });
           }
 
           // Saran lintas SKU - jika Star ada dan ini underperform
           const starExists = rows.some(r => classify(r).label.includes("Star") && r.name !== row.name);
           if (starExists && (bcg.label.includes("Question Mark") || bcg.label.includes("Slow Mover") || bcg.label.includes("Deadstock"))) {
-            sarans.push({ type: "gold", icon: "", title: "Saran realokasi resource",
-              body: `Ada SKU lain yang sedang di posisi Star/terbaik. Pertimbangkan geser sebagian budget iklan dan alokasi stok dari ${row.name} ke SKU yang lebih proven - modal yang berputar lebih cepat menghasilkan cashflow lebih sehat.` });
+            const starSku = rows.find(r => classify(r).label.includes("Star") && r.name !== row.name);
+            sarans.push({ type: "gold", icon: "", title: "Realokasi Resource ke SKU Terbaik",
+              body: `${starSku?.name || "SKU Star"} sedang performa terbaik. Pertimbangkan geser sebagian budget iklan dan alokasi stok dari ${row.name} ke sana — modal yang berputar di SKU Star menghasilkan return lebih cepat. Ini bukan abandon, tapi prioritas alokasi berdasarkan data.` });
           }
 
           const headerBg = bcg.label.includes("Star") ? C.accentLight
@@ -1849,32 +1933,59 @@ function AdPerformance({ skuNames }) {
     const sarstock = []; // saran berbasis stok
 
     // -- Saran berbasis performa iklan -----------------------------
-    if (c.ctr < thresh.ctr * 0.5) sarads.push({ type: "red", text: "CTR sangat rendah (" + c.ctr.toFixed(2) + "%) - ganti foto utama, pakai foto lifestyle bukan catalog. Prioritas perbaiki sebelum naikkan budget." });
-    else if (c.ctr < thresh.ctr) sarads.push({ type: "yellow", text: "CTR di bawah target (" + c.ctr.toFixed(2) + "%) - coba A/B test thumbnail berbeda. Tambahkan label promo atau badge." });
+    // CTR diagnosis
+    if (c.ctr < thresh.ctr * 0.5) {
+      sarads.push({ type: "red", text: `CTR sangat rendah (${c.ctr.toFixed(2)}% vs target ${thresh.ctr}%). Foto utama tidak cukup menarik untuk memancing klik. Prioritas: (1) Ganti thumbnail — coba foto lifestyle dengan model, bukan foto catalog polos. (2) Tambahkan teks overlay: harga, diskon, atau label "BEST SELLER". (3) Jangan naikkan budget sebelum CTR membaik — anggaran sekarang tidak efisien.` });
+    } else if (c.ctr < thresh.ctr) {
+      sarads.push({ type: "yellow", text: `CTR di bawah target (${c.ctr.toFixed(2)}% vs ${thresh.ctr}%). Ada ruang perbaikan: (1) A/B test 2 variasi thumbnail berbeda selama 5 hari. (2) Tambah badge promo atau countdown di foto. (3) Cek kata kunci di judul produk — relevan dengan yang dicari pembeli?` });
+    } else {
+      sarads.push({ type: "green", text: `CTR bagus (${c.ctr.toFixed(2)}%) — thumbnail efektif menarik perhatian. Pertahankan creative ini dan jadikan template untuk SKU lain.` });
+    }
 
-    if (c.atcR < thresh.atc) sarads.push({ type: "yellow", text: "ATC rate rendah (" + c.atcR.toFixed(1) + "%) - harga kurang kompetitif atau deskripsi produk tidak meyakinkan. Cek harga competitor & tambah voucher toko." });
+    // ATC diagnosis
+    if (c.atcR < thresh.atc * 0.5) {
+      sarads.push({ type: "red", text: `ATC rate sangat rendah (${c.atcR.toFixed(1)}% vs target ${thresh.atc}%). Orang klik tapi tidak mau beli. Kemungkinan: (1) Harga tidak kompetitif — cek 5 kompetitor terdekat. (2) Deskripsi produk tidak meyakinkan atau foto tidak lengkap. (3) Review produk jelek? (4) Variasi ukuran/warna tidak tersedia. Perbaiki halaman produk sebelum pertimbangkan naikkan budget.` });
+    } else if (c.atcR < thresh.atc) {
+      sarads.push({ type: "yellow", text: `ATC rate di bawah target (${c.atcR.toFixed(1)}%). Tambahkan voucher toko atau gratis ongkir untuk dorong orang masukkan ke keranjang. Cek juga apakah harga masih kompetitif.` });
+    }
 
-    if (c.cvr < thresh.cvr && c.ctr >= thresh.ctr) sarads.push({ type: "yellow", text: "Traffic masuk tapi tidak convert (CVR " + c.cvr.toFixed(2) + "%) - optimasi halaman produk: foto lebih lengkap, review, dan fast response." });
+    // CVR diagnosis
+    if (c.cvr < thresh.cvr && c.ctr >= thresh.ctr) {
+      sarads.push({ type: "yellow", text: `Traffic masuk tapi conversion rendah (CVR ${c.cvr.toFixed(2)}% vs target ${thresh.cvr}%). Orang tertarik tapi tidak jadi beli: (1) Cek waktu respons chat — pembeli sering tanya sebelum beli. (2) Foto kurang lengkap? Tambah foto detail, ukuran, dan cara pakai. (3) Rating di bawah 4.5? Prioritaskan respond dan selesaikan ulasan negatif.` });
+    } else if (c.cvr >= thresh.cvr * 1.5) {
+      sarads.push({ type: "green", text: `CVR excellent (${c.cvr.toFixed(2)}%) — halaman produk dan harga sudah meyakinkan pembeli. Ini sinyal kuat untuk scale budget.` });
+    }
 
-    if (c.roas >= thresh.roas * 1.5) sarads.push({ type: "green", text: "ROAS excellent (" + c.roas.toFixed(2) + "x) - iklan ini profitable. Pertimbangkan naikkan budget harian 20-30%." });
-    else if (c.roas >= thresh.roas) sarads.push({ type: "green", text: "ROAS on-target (" + c.roas.toFixed(2) + "x) - maintain budget, monitor 3 hari ke depan sebelum keputusan scale." });
-    else if (c.roas < thresh.roas && c.roas >= 1.5) sarads.push({ type: "yellow", text: "ROAS di bawah target (" + c.roas.toFixed(2) + "x) - evaluasi keyword & bid. Turunkan budget 20% sampai ROAS recover." });
-    else if (c.roas < 1.5) sarads.push({ type: "red", text: "ROAS berbahaya (" + c.roas.toFixed(2) + "x) - iklan rugi. Pause atau potong budget minimum sampai ada perbaikan kreatif/harga." });
+    // ROAS diagnosis — paling penting
+    if (c.roas >= thresh.roas * 1.5) {
+      sarads.push({ type: "green", text: `ROAS excellent (${c.roas.toFixed(2)}x vs target ${thresh.roas}x) — iklan ini sangat profitable. Ruang scale masih besar: naikkan budget harian ${fmt(sku.dailyBudget)} → ${fmt(Math.round(sku.dailyBudget * 1.3 / 1000) * 1000)} dan monitor 3 hari. Jika ROAS stabil, naikkan lagi 20%.` });
+    } else if (c.roas >= thresh.roas) {
+      sarads.push({ type: "green", text: `ROAS on-target (${c.roas.toFixed(2)}x). Performa iklan sehat. Maintain budget, monitor 3 hari sebelum keputusan scale. Jika semua metrik stabil, pertimbangkan naikkan 15-20%.` });
+    } else if (c.roas >= thresh.roas * 0.5 && c.roas < thresh.roas) {
+      sarads.push({ type: "yellow", text: `ROAS di bawah target (${c.roas.toFixed(2)}x vs ${thresh.roas}x). Iklan belum profitable di level ini. Turunkan budget harian 20-30% dan fokus perbaiki: keyword bid terlalu tinggi? Creative sudah usang? Coba pause kampanye ini 2 hari dan buat satu variasi baru dengan hook yang berbeda.` });
+    } else if (c.roas < thresh.roas * 0.5 && c.roas >= 1.5) {
+      sarads.push({ type: "yellow", text: `ROAS rendah (${c.roas.toFixed(2)}x) — iklan rugi secara net. Potong budget 50% sekarang. Jangan scale. Fokus dulu perbaiki: creative, harga, atau landing page produk. Iklan dengan ROAS ini hanya bakar modal.` });
+    } else if (c.roas < 1.5) {
+      sarads.push({ type: "red", text: `ROAS BERBAHAYA (${c.roas.toFixed(2)}x) — setiap ${fmt(sku.spend)} yang dikeluarkan hanya menghasilkan ${fmt(sku.revenue)}. Pause atau potong budget ke minimum. Jangan tambah anggaran sampai ada perubahan fundamental: ganti creative, perbaiki harga, atau ubah targeting. Hitung: di ROAS ini, kamu rugi ${fmt(sku.spend - sku.revenue)} dari campaign ini.` });
+    }
 
-    if (c.cpc > thresh.cpc) sarads.push({ type: "yellow", text: "CPC mahal (" + fmt(c.cpc) + ") - keyword terlalu kompetitif. Coba exact match keyword atau long-tail keyword yang lebih spesifik." });
+    // CPC diagnosis
+    if (c.cpc > thresh.cpc * 1.5) {
+      sarads.push({ type: "red", text: `CPC sangat mahal (${fmt(c.cpc)} vs max ${fmt(thresh.cpc)}). Keyword atau kategori terlalu kompetitif. Coba: (1) Kurangi bid manual. (2) Gunakan long-tail keyword yang lebih spesifik. (3) Coba jadwal iklan di jam yang lebih sepi untuk CPC lebih murah.` });
+    } else if (c.cpc > thresh.cpc) {
+      sarads.push({ type: "yellow", text: `CPC di atas target (${fmt(c.cpc)}). Masih profitable jika ROAS tinggi, tapi ada ruang efisiensi. Monitor apakah CPC terus naik — jika ya, pertimbangkan adjust bidding strategy.` });
+    }
 
     // -- Saran berbasis konteks stok forecast ---------------------
     if (fc) {
-      const suggestedBudget = Math.round(sku.dailyBudget / 1000) * 1000;
-
       if (fc.status === "overstock" || fc.status === "deadstock_risk") {
-        const kelebihanUnit = Math.round(fc.excessStock);
+        const kelebihanUnit = Math.max(0, Math.round(fc.excessStock));
         const hariHabis = Math.round(fc.daysOfStock);
         sarstock.push({
           type: "yellow",
-          icon: "-",
-          text: `Stok berlebih ${kelebihanUnit > 0 ? kelebihanUnit + " unit" : ""} - estimasi habis dalam ${hariHabis} hari tanpa aksi.`,
-          action: `Naikkan ROAS target sementara menjadi ${(thresh.roas * 0.8).toFixed(1)}x (lebih longgar) untuk mempercepat penjualan. Tambah budget harian dari ${fmt(sku.dailyBudget)} -> ${fmt(Math.round(sku.dailyBudget * 1.3 / 1000) * 1000)}. Aktifkan voucher flash sale atau bundling.`,
+          icon: "",
+          text: `Stok berlebih — estimasi habis ${hariHabis} hari tanpa akselerasi penjualan.`,
+          action: `Strategi iklan untuk likuidasi: (1) Turunkan floor ROAS target sementara ke ${(thresh.roas * 0.8).toFixed(1)}x untuk mempercepat penjualan. (2) Naikkan budget harian dari ${fmt(sku.dailyBudget)} → ${fmt(Math.round(sku.dailyBudget * 1.3 / 1000) * 1000)}. (3) Aktifkan flash voucher bersamaan dengan iklan. (4) Target habiskan ~${kelebihanUnit > 0 ? kelebihanUnit : Math.round(fc.currentStock * 0.3)} unit kelebihan dalam 14-21 hari.`,
         });
       }
 
@@ -1882,18 +1993,19 @@ function AdPerformance({ skuNames }) {
         sarstock.push({
           type: "red",
           icon: "",
-          text: `Stok KRITIS - hanya ${fc.currentStock} unit tersisa (${fc.daysOfStock.toFixed(0)} hari).`,
-          action: `TAHAN atau PAUSE iklan sekarang. Budget harian saat ini ${fmt(sku.dailyBudget)} terbuang sia-sia jika stok habis di tengah campaign. Aktifkan kembali hanya setelah restock masuk.`,
+          text: `Stok KRITIS — hanya ${fc.currentStock} unit (${fc.daysOfStock.toFixed(0)} hari).`,
+          action: `PAUSE atau potong budget iklan sekarang ke minimum. Budget harian ${fmt(sku.dailyBudget)} yang terus jalan saat stok kritis = memperburuk masalah (order masuk tapi tidak bisa fulfill = rating turun). Aktifkan kembali iklan HANYA setelah restock masuk dan terverifikasi di gudang.`,
         });
       }
 
       if (fc.status === "low") {
         const hariHabis = Math.round(fc.daysOfStock);
+        const targetBudget = Math.round(sku.dailyBudget * 0.6 / 1000) * 1000;
         sarstock.push({
           type: "yellow",
           icon: "",
-          text: `Stok menipis - estimasi habis ${hariHabis} hari lagi (${fc.currentStock} unit).`,
-          action: `Kurangi budget harian dari ${fmt(sku.dailyBudget)} -> ${fmt(Math.round(sku.dailyBudget * 0.6 / 1000) * 1000)} untuk memperlambat penjualan sambil menunggu restock. Jangan pause total agar ranking produk tidak turun.`,
+          text: `Stok menipis — estimasi habis ${hariHabis} hari (${fc.currentStock} unit tersisa).`,
+          action: `Kurangi budget harian ${fmt(sku.dailyBudget)} → ${fmt(targetBudget)} untuk memperlambat penjualan sambil menunggu restock. Jangan pause total — ranking produk di marketplace akan turun. Target: jaga penjualan ~${Math.round((fc.currentStock / hariHabis) * 0.7)}/hari sampai PO tiba.`,
         });
       }
 
@@ -1901,16 +2013,24 @@ function AdPerformance({ skuNames }) {
         sarstock.push({
           type: "green",
           icon: "",
-          text: `Stok aman (${fc.daysOfStock.toFixed(0)} hari) + ROAS on-target.`,
-          action: `Kondisi ideal untuk scale. Naikkan budget harian ${fmt(sku.dailyBudget)} -> ${fmt(Math.round(sku.dailyBudget * 1.2 / 1000) * 1000)} secara bertahap. Monitor 3 hari, jika ROAS stabil naikkan lagi 20%.`,
+          text: `Kondisi ideal: stok aman (${fc.daysOfStock.toFixed(0)} hari) + ROAS on-target.`,
+          action: `Green light untuk scale. Naikkan budget harian ${fmt(sku.dailyBudget)} → ${fmt(Math.round(sku.dailyBudget * 1.2 / 1000) * 1000)} secara bertahap. Monitor ROAS setiap 3 hari — jika stabil, naikkan lagi 15-20%.`,
+        });
+      }
+
+      if (fc.status === "ok" && c.roas < thresh.roas) {
+        sarstock.push({
+          type: "yellow",
+          icon: "",
+          text: `Stok aman tapi ROAS belum on-target.`,
+          action: `Jangan scale budget dulu. Fokus perbaiki ROAS: refresh creative, optimasi bid, atau cek harga vs kompetitor. Scale hanya setelah ROAS konsisten di atas ${thresh.roas}x minimal 3-5 hari berturut-turut.`,
         });
       }
     } else {
-      // Tidak ada data forecast - saran generik berbasis ROAS + budget
       if (c.roas >= thresh.roas) {
-        sarstock.push({ type: "green", icon: "", text: "Performa iklan bagus.", action: `Pertimbangkan scale budget harian dari ${fmt(sku.dailyBudget)} -> ${fmt(Math.round(sku.dailyBudget * 1.2 / 1000) * 1000)}. Hubungkan data Forecast untuk saran berbasis stok.` });
+        sarstock.push({ type: "green", icon: "", text: "Performa iklan bagus.", action: `Pertimbangkan scale budget harian dari ${fmt(sku.dailyBudget)} → ${fmt(Math.round(sku.dailyBudget * 1.2 / 1000) * 1000)}. Hubungkan data Forecast dengan nama SKU yang sama untuk saran berbasis kondisi stok.` });
       } else {
-        sarstock.push({ type: "yellow", icon: "", text: "Belum ada data forecast untuk SKU ini.", action: "Isi modul Demand Forecast dengan nama SKU yang sama untuk mendapat saran berbasis kondisi stok." });
+        sarstock.push({ type: "yellow", icon: "", text: "Belum ada data forecast untuk SKU ini.", action: "Isi modul Demand Forecast dengan nama SKU yang sama untuk mendapat saran berbasis kondisi stok dan lead time." });
       }
     }
 
@@ -1967,18 +2087,41 @@ function AdPerformance({ skuNames }) {
         </div>
         {/* Budget allocation suggestions */}
         <div style={{ borderTop:`1px solid ${C.border}`, paddingTop:12 }}>
-          <div style={{ fontSize:10, fontFamily:FONT_MONO, color:C.textMuted, letterSpacing:"0.12em", textTransform:"uppercase", marginBottom:8 }}>Saran Alokasi Budget</div>
+          <div style={{ fontSize:10, fontFamily:FONT_MONO, color:C.textMuted, letterSpacing:"0.12em", textTransform:"uppercase", marginBottom:8 }}>Analisis & Saran Alokasi Budget</div>
           {blendedROAS < thresh.roas && totalSpend > 0 && (
             <div style={styles.alert("warning")}>
-              Blended ROAS {blendedROAS.toFixed(2)}x di bawah target {thresh.roas}x. Evaluasi SKU dengan ROAS terendah - pertimbangkan geser budget ke SKU yang perform lebih baik sebelum scale total.
+              Blended ROAS {blendedROAS.toFixed(2)}x di bawah target {thresh.roas}x. Total spend {fmt(totalSpend)} menghasilkan {fmt(totalRevenue)} — net {fmt(totalRevenue - totalSpend)}. Evaluasi SKU dengan ROAS terendah dan geser budget ke yang perform lebih baik sebelum scale keseluruhan.
             </div>
           )}
-          {blendedROAS >= thresh.roas && (
+          {blendedROAS >= thresh.roas * 1.5 && (
             <div style={styles.alert("positive")}>
-              Blended ROAS sehat ({blendedROAS.toFixed(2)}x). SKU terbaik bisa dipertimbangkan untuk scale bertahap - naikkan budget max 20% per 3 hari.
+              Blended ROAS excellent ({blendedROAS.toFixed(2)}x) — portofolio iklan sangat profitable. Total net dari semua campaign: {fmt(totalRevenue - totalSpend)}. Ruang untuk scale signifikan — prioritaskan naikkan budget di SKU dengan ROAS tertinggi sambil monitor unit economics per channel.
             </div>
           )}
-  {budgetReallocSuggestion && <div style={styles.alert("accent")}>{budgetReallocSuggestion}</div>}        </div>
+          {blendedROAS >= thresh.roas && blendedROAS < thresh.roas * 1.5 && (
+            <div style={styles.alert("positive")}>
+              Blended ROAS sehat ({blendedROAS.toFixed(2)}x). SKU terbaik bisa dipertimbangkan untuk scale bertahap — naikkan budget max 20% per 3 hari sambil jaga blended ROAS tetap di atas {thresh.roas}x.
+            </div>
+          )}
+          {budgetReallocSuggestion && <div style={styles.alert("accent")}>{budgetReallocSuggestion}</div>}
+          {/* SKU performance ranking */}
+          {skus.length >= 2 && (() => {
+            const withRoas = skus.map((s,i) => ({ ...s, roas: s.spend>0?s.revenue/s.spend:0 }));
+            const sorted = [...withRoas].sort((a,b) => b.roas - a.roas);
+            const best = sorted[0];
+            const worst = sorted[sorted.length-1];
+            const budgetConcentration = totalSpend > 0 ? (Math.max(...skus.map(s=>s.spend)) / totalSpend * 100).toFixed(0) : 0;
+            return (
+              <div style={{ fontSize:11, fontFamily:FONT_MONO, color:C.textSecondary, marginTop:8, lineHeight:1.7 }}>
+                Ranking ROAS: {sorted.map((s,i) => (
+                  <span key={i} style={{ color: i===0?C.positive:i===sorted.length-1&&s.roas<thresh.roas?C.negative:C.textSecondary }}>
+                    {i>0?" › ":""}{s.name} ({s.roas.toFixed(2)}x)
+                  </span>
+                ))}.{budgetConcentration > 60 && ` Konsentrasi budget terlalu tinggi di satu SKU (${budgetConcentration}%) — pertimbangkan diversifikasi.`}
+              </div>
+            );
+          })()}
+        </div>
       </div>
 
       {/* Threshold Settings */}
